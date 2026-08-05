@@ -5,7 +5,7 @@ const WEEKDAY_SLOTS = ["06:15", "07:15", "08:15", "11:15", "16:30", "17:30", "18
 const WEEKEND_SLOTS = ["08:00", "09:00", "10:00", "11:00"];
 const INSTRUCTORS = ["Ana B.", "Ana Paula", "Gabriel Marcondes", "Gabriel Vilela", "Thiago"];
 const AJUDA_WHATSAPP = "5518991404769";
-const DESAFIO_INICIO = "2026-08-05";
+const DESAFIO_INICIO = "2026-08-06";
 const ADMINS = {
   recepcao: "203948!#",
   raquel: "211308!#",
@@ -1102,7 +1102,7 @@ export default function App() {
             📒 Manual Prático das Missões | {TK.label}
           </h2>
           <div style={{ color: C.mut, fontSize: 12, marginBottom: 4, marginTop: 4 }}>
-            Desafio válido de 5 de agosto a 20 de setembro de 2026
+            Aulas valem de 6 de agosto a 20 de setembro de 2026
           </div>
           {track === "passe" && (
             <div className="rounded-xl p-4 mt-3" style={{ background: C.panel, border: `1.5px solid ${C.oak}`, boxShadow: `0 0 14px ${C.oak}33` }}>
@@ -1122,7 +1122,7 @@ export default function App() {
               {bullet(<span><b>Cadastre-se</b> com nome e sobrenome e crie sua senha (só você acessa sua cartela).</span>, 1)}
               {bullet(<span>A recepção <b>libera seu cadastro</b> e você já pode registrar.</span>, 2)}
               {bullet(<span><b>Registre cada aula</b> no app (data, horário e professor). O registro fica <b>pendente</b> até a recepção validar.</span>, 3)}
-              {bullet(<span>Esqueceu de registrar? Sem pânico: dá para registrar <b>dias anteriores</b> (a partir de 5/ago). Datas futuras não valem.</span>, 4)}
+              {bullet(<span>Esqueceu de registrar? Sem pânico: dá para registrar <b>dias anteriores</b> (a partir de 6/ago). Datas futuras não valem.</span>, 4)}
               {bullet(<span>Existem <b>3 desafios separados</b> — Ilimitados, Pacotes e Híbridos. Cada grupo compete apenas entre si, com metas ajustadas ao seu ritmo.</span>, 5)}
               {bullet(
                 track === "ilimitado" ? (
@@ -1262,7 +1262,7 @@ export default function App() {
   };
 
   const validaData = (d) => {
-    if (d < DESAFIO_INICIO) return `O desafio começa em 5/ago — só valem aulas a partir dessa data.`;
+    if (d < DESAFIO_INICIO) return `O desafio começa em 6/ago — só valem aulas a partir dessa data.`;
     if (d > todayStr()) return "Não dá para registrar aulas de datas futuras.";
     return "";
   };
