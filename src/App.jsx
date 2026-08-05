@@ -751,7 +751,7 @@ export default function App() {
     >
       {`● ADMIN · ${(adminUser || "").toUpperCase()}`}
     </button>
-  ) : track ? (
+  ) : track && !view ? (
     <button
       onClick={() => { setShowEntry(true); setShowSignup(false); window.scrollTo({ top: 0 }); }}
       className="rounded-full px-3.5 py-1 font-bold"
@@ -759,7 +759,7 @@ export default function App() {
     >
       ENTRAR NAS MISSÕES
     </button>
-  ) : (
+  ) : track ? null : (
     <button
       onClick={() => setPinModal(true)}
       className="rounded-full px-3 py-1"
@@ -791,6 +791,120 @@ export default function App() {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ "--panel": "rgba(255,255,255,0.05)", "--panelSoft": "rgba(255,255,255,0.09)", "--line": "rgba(255,255,255,0.14)", background: C.bg, color: C.mut }}>
         Carregando…
+      </div>
+    );
+  }
+
+  // ---------- Central de pendências (administração) ----------
+  if (showPend && admin) {
+    const validarItem = (tid, sid, kind, itemId) => {
+      mutateTrack(tid, (d) => {
+        const s = d.students.find((x) => x.id === sid);
+        if (!s) return;
+        const arr = kind === "rec" ? s.records : s.guests;
+        const it = (arr || []).find((x) => x.id === itemId);
+        if (it) it.status = "ok";
+      });
+    };
+    const liberar = (tid, sid) => {
+      mutateTrack(tid, (d) => { const s = d.students.find((x) => x.id === sid); if (s) s.approved = true; });
+    };
+    const validarGrupo = (tid) => {
+      mutateTrack(tid, (d) => {
+        d.students.forEach((s) => {
+          (s.records || []).forEach((r) => { if (r.status === "pending") r.status = "ok"; });
+          (s.guests || []).forEach((g) => { if (g.status === "pending") g.status = "ok"; });
+        });
+      });
+    };
+    return (
+      <div className="min-h-screen" style={{ ...pageVars, background: pageBg, fontFamily: "'Montserrat', sans-serif", transition: "background .4s" }}>
+        {fonts}{modal}
+        <main className="max-w-md mx-auto px-5 pb-16 pt-6">
+          <div className="flex items-center justify-between">
+            <button onClick={() => setShowPend(false)} style={{ color: C.oak, fontSize: 13 }}>← Voltar</button>
+            {lockBtn}
+          </div>
+          <h2 className="mt-4 mb-1" style={{ fontWeight: 800, fontSize: 22, color: C.amber, textTransform: "uppercase", letterSpacing: "0.03em" }}>
+            📋 Central de Pendências
+          </h2>
+          <div style={{ color: C.mut, fontSize: 12, marginBottom: 12 }}>
+            Valide um a um ou o grupo inteiro de uma vez. Atualiza sozinha a cada 30s.
+          </div>
+
+          {TRACKS.map((t) => {
+            const d = allData[t.id];
+            const cadastros = d ? d.students.filter((s) => s.approved === false) : [];
+            const itens = [];
+            if (d) d.students.forEach((s) => {
+              (s.records || []).forEach((r) => {
+                if (r.status === "pending") itens.push({ tipo: "rec", s, it: r, ord: r.reg || 0 });
+              });
+              (s.guests || []).forEach((g) => {
+                if (g.status === "pending") itens.push({ tipo: "guest", s, it: g, ord: g.reg || 0 });
+              });
+            });
+            itens.sort((a, b) => a.ord - b.ord);
+            const total = itens.length + cadastros.length;
+            return (
+              <section key={t.id} className="rounded-xl p-4 mt-4" style={{ background: C.panel, border: `1px solid ${total ? C.amber + "77" : C.line}` }}>
+                <div className="flex items-center justify-between gap-2">
+                  <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, letterSpacing: "0.2em", color: C.oak, textTransform: "uppercase" }}>
+                    {t.label}
+                  </div>
+                  <div style={{ color: total ? C.amberSoft : C.mut, fontWeight: 800, fontSize: 12 }}>
+                    {total} pendência{total === 1 ? "" : "s"}
+                  </div>
+                </div>
+                {!d && <div className="mt-2" style={{ color: C.mut, fontSize: 12 }}>carregando…</div>}
+                {d && total === 0 && <div className="mt-2" style={{ color: C.ok, fontSize: 12 }}>✓ tudo em dia</div>}
+
+                {cadastros.length > 0 && (
+                  <div className="mt-3">
+                    <div style={{ color: C.mut, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 4 }}>⏳ Cadastros aguardando liberação</div>
+                    <div className="flex flex-col gap-1">
+                      {cadastros.map((s) => (
+                        <div key={s.id} className="rounded-lg px-3 py-2 flex items-center gap-2" style={{ background: C.panelSoft, border: `1px dashed ${C.line}` }}>
+                          <div className="flex-1 min-w-0 truncate" style={{ color: C.cream, fontWeight: 700, fontSize: 13 }}>{s.name}</div>
+                          <button onClick={() => liberar(t.id, s.id)} className="rounded px-2.5 py-1 font-bold" style={{ background: C.ok, color: C.bg, fontSize: 12 }}>Liberar</button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {itens.length > 0 && (
+                  <div className="mt-3">
+                    <div className="flex items-center justify-between" style={{ marginBottom: 4 }}>
+                      <div style={{ color: C.mut, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em" }}>Aulas e amigos pendentes</div>
+                      <button onClick={() => validarGrupo(t.id)} className="rounded px-2 py-1 font-bold" style={{ background: C.amber, color: C.cream, fontSize: 11 }}>
+                        ✓ Validar todas ({itens.length})
+                      </button>
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      {itens.map(({ tipo, s, it }) => (
+                        <div key={it.id} className="rounded-lg px-3 py-2 flex items-center gap-2" style={{ background: C.panelSoft, border: `1px solid ${C.amber}55` }}>
+                          <div className="flex-1 min-w-0">
+                            <div className="truncate" style={{ color: C.cream, fontWeight: 700, fontSize: 13 }}>{s.name}</div>
+                            <div style={{ color: C.mut, fontSize: 11.5, fontFamily: "'DM Mono', monospace" }}>
+                              {tipo === "rec"
+                                ? `aula · ${fmtBR(it.date)} · ${it.slot.replace(":", "h")} · ${it.instructor}`
+                                : `amigo · ${it.name} · ${fmtBR(it.date)} · ${it.slot.replace(":", "h")}`}
+                            </div>
+                          </div>
+                          <button onClick={() => validarItem(t.id, s.id, tipo, it.id)} className="rounded px-2.5 py-1 font-bold" style={{ background: C.ok, color: C.bg, fontSize: 12 }}>✓</button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </section>
+            );
+          })}
+
+          {footerNote}
+          <div className="flex justify-center pb-8">{helpBtn}</div>
+        </main>
       </div>
     );
   }
@@ -834,6 +948,27 @@ export default function App() {
               </button>
             ))}
           </div>
+          {admin && (
+            <button
+              onClick={() => { setShowPend(true); window.scrollTo({ top: 0 }); }}
+              className="w-full rounded-lg px-3 py-2.5 mt-4 text-center font-bold"
+              style={{ background: C.wineDeep, color: C.amberSoft, fontSize: 13, border: `1px solid ${C.amber}66` }}
+            >
+              📋 PENDÊNCIAS · {(() => {
+                let n = 0;
+                TRACKS.forEach((t) => {
+                  const d = allData[t.id];
+                  if (!d) return;
+                  d.students.forEach((s) => {
+                    n += (s.records || []).filter((r) => r.status === "pending").length;
+                    n += (s.guests || []).filter((g) => g.status === "pending").length;
+                    if (s.approved === false) n += 1;
+                  });
+                });
+                return n;
+              })()} → abrir central de validação
+            </button>
+          )}
           {footerNote}
         </main>
       </div>
@@ -1317,120 +1452,6 @@ export default function App() {
     );
   }
 
-  // ---------- Central de pendências (administração) ----------
-  if (showPend && admin) {
-    const validarItem = (tid, sid, kind, itemId) => {
-      mutateTrack(tid, (d) => {
-        const s = d.students.find((x) => x.id === sid);
-        if (!s) return;
-        const arr = kind === "rec" ? s.records : s.guests;
-        const it = (arr || []).find((x) => x.id === itemId);
-        if (it) it.status = "ok";
-      });
-    };
-    const liberar = (tid, sid) => {
-      mutateTrack(tid, (d) => { const s = d.students.find((x) => x.id === sid); if (s) s.approved = true; });
-    };
-    const validarGrupo = (tid) => {
-      mutateTrack(tid, (d) => {
-        d.students.forEach((s) => {
-          (s.records || []).forEach((r) => { if (r.status === "pending") r.status = "ok"; });
-          (s.guests || []).forEach((g) => { if (g.status === "pending") g.status = "ok"; });
-        });
-      });
-    };
-    return (
-      <div className="min-h-screen" style={{ ...pageVars, background: pageBg, fontFamily: "'Montserrat', sans-serif", transition: "background .4s" }}>
-        {fonts}{modal}
-        <main className="max-w-md mx-auto px-5 pb-16 pt-6">
-          <div className="flex items-center justify-between">
-            <button onClick={() => setShowPend(false)} style={{ color: C.oak, fontSize: 13 }}>← Voltar</button>
-            {lockBtn}
-          </div>
-          <h2 className="mt-4 mb-1" style={{ fontWeight: 800, fontSize: 22, color: C.amber, textTransform: "uppercase", letterSpacing: "0.03em" }}>
-            📋 Central de Pendências
-          </h2>
-          <div style={{ color: C.mut, fontSize: 12, marginBottom: 12 }}>
-            Valide um a um ou o grupo inteiro de uma vez. Atualiza sozinha a cada 30s.
-          </div>
-
-          {TRACKS.map((t) => {
-            const d = allData[t.id];
-            const cadastros = d ? d.students.filter((s) => s.approved === false) : [];
-            const itens = [];
-            if (d) d.students.forEach((s) => {
-              (s.records || []).forEach((r) => {
-                if (r.status === "pending") itens.push({ tipo: "rec", s, it: r, ord: r.reg || 0 });
-              });
-              (s.guests || []).forEach((g) => {
-                if (g.status === "pending") itens.push({ tipo: "guest", s, it: g, ord: g.reg || 0 });
-              });
-            });
-            itens.sort((a, b) => a.ord - b.ord);
-            const total = itens.length + cadastros.length;
-            return (
-              <section key={t.id} className="rounded-xl p-4 mt-4" style={{ background: C.panel, border: `1px solid ${total ? C.amber + "77" : C.line}` }}>
-                <div className="flex items-center justify-between gap-2">
-                  <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, letterSpacing: "0.2em", color: C.oak, textTransform: "uppercase" }}>
-                    {t.label}
-                  </div>
-                  <div style={{ color: total ? C.amberSoft : C.mut, fontWeight: 800, fontSize: 12 }}>
-                    {total} pendência{total === 1 ? "" : "s"}
-                  </div>
-                </div>
-                {!d && <div className="mt-2" style={{ color: C.mut, fontSize: 12 }}>carregando…</div>}
-                {d && total === 0 && <div className="mt-2" style={{ color: C.ok, fontSize: 12 }}>✓ tudo em dia</div>}
-
-                {cadastros.length > 0 && (
-                  <div className="mt-3">
-                    <div style={{ color: C.mut, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 4 }}>⏳ Cadastros aguardando liberação</div>
-                    <div className="flex flex-col gap-1">
-                      {cadastros.map((s) => (
-                        <div key={s.id} className="rounded-lg px-3 py-2 flex items-center gap-2" style={{ background: C.panelSoft, border: `1px dashed ${C.line}` }}>
-                          <div className="flex-1 min-w-0 truncate" style={{ color: C.cream, fontWeight: 700, fontSize: 13 }}>{s.name}</div>
-                          <button onClick={() => liberar(t.id, s.id)} className="rounded px-2.5 py-1 font-bold" style={{ background: C.ok, color: C.bg, fontSize: 12 }}>Liberar</button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {itens.length > 0 && (
-                  <div className="mt-3">
-                    <div className="flex items-center justify-between" style={{ marginBottom: 4 }}>
-                      <div style={{ color: C.mut, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em" }}>Aulas e amigos pendentes</div>
-                      <button onClick={() => validarGrupo(t.id)} className="rounded px-2 py-1 font-bold" style={{ background: C.amber, color: C.cream, fontSize: 11 }}>
-                        ✓ Validar todas ({itens.length})
-                      </button>
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      {itens.map(({ tipo, s, it }) => (
-                        <div key={it.id} className="rounded-lg px-3 py-2 flex items-center gap-2" style={{ background: C.panelSoft, border: `1px solid ${C.amber}55` }}>
-                          <div className="flex-1 min-w-0">
-                            <div className="truncate" style={{ color: C.cream, fontWeight: 700, fontSize: 13 }}>{s.name}</div>
-                            <div style={{ color: C.mut, fontSize: 11.5, fontFamily: "'DM Mono', monospace" }}>
-                              {tipo === "rec"
-                                ? `aula · ${fmtBR(it.date)} · ${it.slot.replace(":", "h")} · ${it.instructor}`
-                                : `amigo · ${it.name} · ${fmtBR(it.date)} · ${it.slot.replace(":", "h")}`}
-                            </div>
-                          </div>
-                          <button onClick={() => validarItem(t.id, s.id, tipo, it.id)} className="rounded px-2.5 py-1 font-bold" style={{ background: C.ok, color: C.bg, fontSize: 12 }}>✓</button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </section>
-            );
-          })}
-
-          {footerNote}
-          <div className="flex justify-center pb-8">{helpBtn}</div>
-        </main>
-      </div>
-    );
-  }
-
   // ---------- Já estou no desafio (login) ----------
   if (!student && loginMode) {
     const tryLogin = () => {
@@ -1538,28 +1559,6 @@ export default function App() {
         </header>
 
         <main className="max-w-md mx-auto px-5 pb-16">
-          {admin && (
-            <button
-              onClick={() => { setShowPend(true); window.scrollTo({ top: 0 }); }}
-              className="w-full rounded-lg px-3 py-2.5 mb-4 text-center font-bold"
-              style={{ background: C.wineDeep, color: C.amberSoft, fontSize: 13, border: `1px solid ${C.amber}66` }}
-            >
-              📋 PENDÊNCIAS · {(() => {
-                let n = 0;
-                TRACKS.forEach((t) => {
-                  const d = allData[t.id];
-                  if (!d) return;
-                  d.students.forEach((s) => {
-                    n += (s.records || []).filter((r) => r.status === "pending").length;
-                    n += (s.guests || []).filter((g) => g.status === "pending").length;
-                    if (s.approved === false) n += 1;
-                  });
-                });
-                return n;
-              })()} → abrir central de validação
-            </button>
-          )}
-
           <p className="text-center mb-3" style={{ color: C.mut, fontSize: 13 }}>
             Toque em ENTRAR NAS MISSÕES, no topo, para registrar suas aulas — e acompanhe o ranking do desafio abaixo.
           </p>
