@@ -284,6 +284,7 @@ function captureWinners(d) {
     const news = [];
     d.students.forEach((s) => {
       if (have.has(s.id)) return;
+      if (d.winners.excluded && d.winners.excluded[`m:${m.id}:${s.id}`]) return;
       const dt = md(s)[m.id];
       if (dt) news.push({ name: s.name, id: s.id, date: dt, reg: regOfDate(s, dt) });
     });
@@ -319,6 +320,7 @@ function captureWinners(d) {
     const news = [];
     d.students.forEach((s) => {
       if (have.has(s.id)) return;
+      if (d.winners.excluded && d.winners.excluded[`p:${k}:${s.id}`]) return;
       let dt = patternDate(s, groups);
       if (dt && k === "bpm" && (s.guests || []).filter((g) => g.bought).length < 4) dt = null;
       if (dt) news.push({ id: s.id, name: s.name, date: dt, reg: regOfDate(s, dt) });
@@ -335,6 +337,7 @@ function captureWinners(d) {
     const news = [];
     d.students.forEach((s) => {
       if (have.has(s.id)) return;
+      if (d.winners.excluded && d.winners.excluded[`p:conv:${s.id}`]) return;
       const bs = (s.guests || []).filter((g) => g.bought).map((g) => g.boughtTs || g.reg || 0).sort((a, b) => a - b);
       if (bs.length >= 4) {
         const t4 = bs[3] || now;
@@ -348,6 +351,28 @@ function captureWinners(d) {
 }
 
 // ---------- Distribuição de prêmios: teto de 2 shakes e 2 padrões por aluno ----------
+function purgeStudentWins(d, sid) {
+  const w = d.winners;
+  if (w) {
+    if (w.missionQueues) Object.keys(w.missionQueues).forEach((k) => {
+      w.missionQueues[k] = (w.missionQueues[k] || []).filter((e) => e.id !== sid);
+      if (w.missions && w.missions[k] && w.missions[k].id === sid) {
+        w.missions[k] = w.missionQueues[k][0] ? { ...w.missionQueues[k][0] } : null;
+      }
+    });
+    if (w.placements) Object.keys(w.placements).forEach((k) => {
+      w.placements[k] = (w.placements[k] || []).filter((e) => e.id !== sid);
+      if (w.patterns && w.patterns[k] && w.patterns[k].id === sid) {
+        w.patterns[k] = w.placements[k][0] ? { ...w.placements[k][0] } : null;
+      }
+    });
+  }
+  (d.miniMissions || []).forEach((x) => {
+    if (x.winners) x.winners = x.winners.filter((e) => e.id !== sid);
+    if (x.attempts) delete x.attempts[sid];
+  });
+}
+
 function computeAwards(d) {
   const w = (d && d.winners) || {};
   const mq = w.missionQueues || {};
@@ -425,7 +450,11 @@ async function loadData(track) {
   }
 }
 async function saveData(track, data) {
-  try { await window.storage.set(keyFor(track), JSON.stringify(data), true); } catch (e) { console.error(e); }
+  try {
+    const cur = await window.storage.get(keyFor(track), true);
+    if (cur && cur.value) await window.storage.set(keyFor(track) + "-bak", cur.value, true);
+  } catch { /* backup é melhor esforço */ }
+  await window.storage.set(keyFor(track), JSON.stringify(data), true);
 }
 async function loadTrackPref() {
   try { const r = await window.storage.get(TRACK_PREF_KEY, false); return r ? r.value : null; } catch { return null; }
@@ -609,6 +638,10 @@ export default function App() {
   const [mmMsg, setMmMsg] = useState("");
   const [miniAward, setMiniAward] = useState({});
   const [showAllMini, setShowAllMini] = useState(false);
+  const [confirmDel, setConfirmDel] = useState("");
+  const [addOpen, setAddOpen] = useState("");
+  const [syncMsg, setSyncMsg] = useState("");
+  const avisar = (m) => { setSyncMsg(m); setTimeout(() => setSyncMsg(""), 6000); };
   const [allData, setAllData] = useState({});
   const [showPend, setShowPend] = useState(false);
   const [showEntry, setShowEntry] = useState(false);
@@ -671,37 +704,107 @@ export default function App() {
     return () => { alive = false; clearInterval(iv); };
   }, [admin]);
 
+  const delWin = (kind, key, sid) => {
+    mutate((d) => {
+      if (!d.winners) return;
+      d.winners.excluded = d.winners.excluded || {};
+      d.winners.excluded[`${kind}:${key}:${sid}`] = true;
+      if (kind === "m") {
+        if (d.winners.missionQueues) {
+          d.winners.missionQueues[key] = (d.winners.missionQueues[key] || []).filter((e) => e.id !== sid);
+        }
+        if (d.winners.missions && d.winners.missions[key] && d.winners.missions[key].id === sid) {
+          const q = (d.winners.missionQueues && d.winners.missionQueues[key]) || [];
+          d.winners.missions[key] = q[0] ? { ...q[0] } : null;
+        }
+      } else {
+        if (d.winners.placements) {
+          d.winners.placements[key] = (d.winners.placements[key] || []).filter((e) => e.id !== sid);
+        }
+        if (d.winners.patterns && d.winners.patterns[key] && d.winners.patterns[key].id === sid) {
+          const l = (d.winners.placements && d.winners.placements[key]) || [];
+          d.winners.patterns[key] = l[0] ? { ...l[0] } : null;
+        }
+      }
+    });
+  };
+
+  const addWinManual = (kind, key, sid) => {
+    mutate((d) => {
+      const s = d.students.find((x) => x.id === sid);
+      if (!s) return;
+      if (!d.winners) d.winners = { missions: {}, patterns: {}, placements: {}, missionQueues: {} };
+      if (d.winners.excluded) delete d.winners.excluded[`${kind}:${key}:${sid}`];
+      const entry = { id: s.id, name: s.name, date: todayStr(), reg: Date.now(), ts: Date.now() };
+      if (kind === "m") {
+        if (!d.winners.missionQueues) d.winners.missionQueues = {};
+        const q = d.winners.missionQueues[key] = d.winners.missionQueues[key] || [];
+        if (!q.some((e) => e.id === sid)) q.push(entry);
+        if (!d.winners.missions[key]) d.winners.missions[key] = { ...entry };
+      } else {
+        if (!d.winners.placements) d.winners.placements = {};
+        const l = d.winners.placements[key] = d.winners.placements[key] || [];
+        if (!l.some((e) => e.id === sid)) l.push(entry);
+        if (!d.winners.patterns) d.winners.patterns = {};
+        if (!d.winners.patterns[key]) d.winners.patterns[key] = { ...entry };
+      }
+    });
+    setAddOpen("");
+  };
+
   const mutateTrack = (tid, fn) => {
     (async () => {
-      let base = allData[tid] || { pin: null, students: [] };
+      let base = null;
       try {
         const res = await window.storage.get(keyFor(tid), true);
-        if (res) base = JSON.parse(res.value);
-      } catch { /* usa o estado atual */ }
+        base = res ? JSON.parse(res.value) : { pin: null, students: [] };
+      } catch {
+        avisar("⚠️ Sem conexão com o banco — a ação NÃO foi salva. Tente novamente.");
+        return;
+      }
       const next = JSON.parse(JSON.stringify(base));
       try { fn(next); } catch (e) { console.error(e); return; }
+      if ((base.students || []).length - (next.students || []).length > 1) {
+        avisar("⚠️ Ação bloqueada por segurança: removeria vários alunos de uma vez.");
+        return;
+      }
       const prevM = MISSIONS;
       MISSIONS = TRACK_MISSIONS[tid];
       captureWinners(next);
       MISSIONS = prevM;
-      await saveData(tid, next);
-      setAllData((a) => ({ ...a, [tid]: next }));
-      if (tid === track) setData(next);
+      try {
+        await saveData(tid, next);
+        setAllData((a) => ({ ...a, [tid]: next }));
+        if (tid === track) setData(next);
+      } catch {
+        avisar("⚠️ Falha ao salvar — a ação NÃO foi gravada. Tente novamente.");
+      }
     })();
   };
 
   const mutate = (fn) => {
     (async () => {
-      let base = data;
+      let base = null;
       try {
         const res = await window.storage.get(keyFor(track), true);
-        if (res) base = JSON.parse(res.value);
-      } catch { /* sem conexão: usa o estado atual */ }
+        base = res ? JSON.parse(res.value) : { pin: null, students: [] };
+      } catch {
+        avisar("⚠️ Sem conexão com o banco — a ação NÃO foi salva. Tente novamente.");
+        return;
+      }
       const next = JSON.parse(JSON.stringify(base));
       try { fn(next); } catch (e) { console.error(e); return; }
+      if ((base.students || []).length - (next.students || []).length > 1) {
+        avisar("⚠️ Ação bloqueada por segurança: removeria vários alunos de uma vez.");
+        return;
+      }
       captureWinners(next);
-      await saveData(track, next);
-      setData(next);
+      try {
+        await saveData(track, next);
+        setData(next);
+      } catch {
+        avisar("⚠️ Falha ao salvar — a ação NÃO foi gravada. Tente novamente.");
+      }
     })();
   };
 
@@ -769,7 +872,16 @@ export default function App() {
     </button>
   );
 
-  const fonts = <style>{"@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&family=DM+Mono:wght@400;500&display=swap');"}</style>;
+  const fonts = (
+    <>
+      <style>{"@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&family=DM+Mono:wght@400;500&display=swap');"}</style>
+      {syncMsg && (
+        <div style={{ position: "fixed", top: 10, left: "50%", transform: "translateX(-50%)", zIndex: 9999, background: "#B15560", color: "#fff", padding: "10px 16px", borderRadius: 10, fontSize: 13, fontWeight: 700, maxWidth: "92%", textAlign: "center", boxShadow: "0 4px 20px rgba(0,0,0,.5)" }}>
+          {syncMsg}
+        </div>
+      )}
+    </>
+  );
 
   const modal = pinModal && (
     <AdminModal
@@ -808,6 +920,19 @@ export default function App() {
     };
     const liberar = (tid, sid) => {
       mutateTrack(tid, (d) => { const s = d.students.find((x) => x.id === sid); if (s) s.approved = true; });
+    };
+    const restaurarBackup = async (tid) => {
+      try {
+        const bak = await window.storage.get(keyFor(tid) + "-bak", true);
+        if (!bak || !bak.value) { avisar("Não há backup disponível para este grupo ainda."); return; }
+        await window.storage.set(keyFor(tid), bak.value, true);
+        const d = JSON.parse(bak.value);
+        setAllData((a) => ({ ...a, [tid]: d }));
+        if (tid === track) setData(d);
+        avisar("↩️ Backup restaurado com sucesso!");
+      } catch {
+        avisar("⚠️ Falha ao restaurar. Tente novamente.");
+      }
     };
     const validarGrupo = (tid) => {
       mutateTrack(tid, (d) => {
@@ -858,6 +983,22 @@ export default function App() {
                 </div>
                 {!d && <div className="mt-2" style={{ color: C.mut, fontSize: 12 }}>carregando…</div>}
                 {d && total === 0 && <div className="mt-2" style={{ color: C.ok, fontSize: 12 }}>✓ tudo em dia</div>}
+                {d && (
+                  <div className="mt-2 flex items-center justify-between" style={{ fontSize: 11, color: C.mut }}>
+                    <span>{d.students.length} aluno{d.students.length === 1 ? "" : "s"} cadastrado{d.students.length === 1 ? "" : "s"}</span>
+                    {confirmDel === `bak:${t.id}` ? (
+                      <span className="flex items-center gap-1">
+                        <span style={{ color: "#C96A76", fontWeight: 700, fontSize: 10 }}>Substitui os dados atuais!</span>
+                        <button onClick={() => { restaurarBackup(t.id); setConfirmDel(""); }} className="rounded px-1.5 py-0.5 font-bold" style={{ background: "#B15560", color: C.cream, fontSize: 10 }}>SIM</button>
+                        <button onClick={() => setConfirmDel("")} className="rounded px-1.5 py-0.5" style={{ color: C.mut, fontSize: 10, border: `1px solid ${C.line}` }}>não</button>
+                      </span>
+                    ) : (
+                      <button onClick={() => setConfirmDel(`bak:${t.id}`)} className="rounded px-2 py-0.5" style={{ color: C.oak, fontSize: 10.5, border: `1px dashed ${C.line}` }}>
+                        ↩️ Restaurar última gravação
+                      </button>
+                    )}
+                  </div>
+                )}
 
                 {cadastros.length > 0 && (
                   <div className="mt-3">
@@ -1647,7 +1788,7 @@ export default function App() {
                           {confirmRefuse === s.id ? (
                             <>
                               <button
-                                onClick={() => { mutate((d) => { d.students = d.students.filter((y) => y.id !== s.id); }); setConfirmRefuse(null); }}
+                                onClick={() => { mutate((d) => { purgeStudentWins(d, s.id); d.students = d.students.filter((y) => y.id !== s.id); }); setConfirmRefuse(null); }}
                                 className="rounded px-2 py-1 font-bold"
                                 style={{ background: "#B15560", color: C.cream, fontSize: 11 }}
                               >Confirmar exclusão</button>
@@ -1895,21 +2036,50 @@ export default function App() {
                   🥤 Shake do Mês · 1º de cada missão
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  {winners.map(({ m, best }) => (
+                  {winners.map(({ m, best }) => {
+                    const dk = `m:${m.id}`;
+                    return (
                     <div key={m.id} className="flex items-center gap-2">
                       <div className="shrink-0" style={{ width: 128, fontSize: 11, fontWeight: 700, color: best ? C.cream : C.mut, textTransform: "uppercase", lineHeight: 1.2 }}>
                         {m.name}
                       </div>
-                      <div className="flex-1 min-w-0 truncate" style={{ fontSize: 12, color: best ? C.amber : C.mut, fontWeight: best ? 700 : 400 }}>
-                        {best ? best.name : "em aberto"}
-                      </div>
-                      {best && (
+                      {admin && addOpen === dk && !best ? (
+                        <select autoFocus defaultValue="" onChange={(e) => e.target.value && addWinManual("m", m.id, e.target.value)}
+                          className="flex-1 min-w-0 rounded px-2 py-1 outline-none" style={{ background: C.panelSoft, border: `1px solid ${C.amber}`, color: C.cream, fontSize: 12 }}>
+                          <option value="" disabled>Premiar aluno…</option>
+                          {data.students.filter((s) => s.approved !== false).sort((a, b) => a.name.localeCompare(b.name)).map((s) => (
+                            <option key={s.id} value={s.id}>{s.name}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <div className="flex-1 min-w-0 truncate" style={{ fontSize: 12, color: best ? C.amber : C.mut, fontWeight: best ? 700 : 400 }}>
+                          {best ? best.name : "em aberto"}
+                        </div>
+                      )}
+                      {best && confirmDel !== dk && (
                         <div className="shrink-0" style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: C.mut }}>
                           {best.reg ? fmtTs(best.reg) : best.ts ? fmtTs(best.ts) : fmtBR(best.date)}
                         </div>
                       )}
+                      {admin && best && confirmDel !== dk && (
+                        <button onClick={() => setConfirmDel(dk)} className="shrink-0 rounded px-1.5" title="Excluir conquista"
+                          style={{ color: "#C96A76", fontSize: 12, border: `1px solid ${C.line}` }}>✕</button>
+                      )}
+                      {admin && best && confirmDel === dk && (
+                        <div className="shrink-0 flex items-center gap-1">
+                          <span style={{ color: "#C96A76", fontSize: 9.5, fontWeight: 700 }}>Irreversível!</span>
+                          <button onClick={() => { delWin("m", m.id, best.id); setConfirmDel(""); }}
+                            className="rounded px-1.5 py-0.5 font-bold" style={{ background: "#B15560", color: C.cream, fontSize: 10 }}>SIM</button>
+                          <button onClick={() => setConfirmDel("")} className="rounded px-1.5 py-0.5" style={{ color: C.mut, fontSize: 10, border: `1px solid ${C.line}` }}>não</button>
+                        </div>
+                      )}
+                      {admin && !best && (
+                        <button onClick={() => setAddOpen(addOpen === dk ? "" : dk)} className="shrink-0 rounded px-1.5" title="Premiar manualmente"
+                          style={{ color: C.oak, fontSize: 12, border: `1px solid ${C.line}` }}>{addOpen === dk ? "✕" : "＋"}</button>
+                      )}
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </section>
             );
@@ -1918,13 +2088,13 @@ export default function App() {
           {(() => {
             const AW2 = computeAwards(data);
             const PRIZES = [
-              { label: "Horizontal", prize: "camiseta Spincycle", best: AW2.pats.horiz || null },
-              { label: "Vertical", prize: "camiseta Spincycle", best: AW2.pats.vert || null },
-              { label: "Diagonal", prize: "camiseta Spincycle", best: AW2.pats.diag || null },
-              { label: "4 Cantos", prize: "bolsinha Spincycle", best: AW2.pats.corners || null },
-              { label: "4 Conversões", prize: "escolha da aula temática (independe de missões)", best: AW2.pats.conv || null },
-              { label: "Cartela Cheia", prize: "treinamento + 1 mês de aula ilimitado", best: AW2.pats.full || null },
-              { label: "Giro de 175 BPM", prize: "Desafio Plus: aula fechada (sáb ou dom) para 33 convidados", best: AW2.pats.bpm || null },
+              { k: "horiz", label: "Horizontal", prize: "camiseta Spincycle", best: AW2.pats.horiz || null },
+              { k: "vert", label: "Vertical", prize: "camiseta Spincycle", best: AW2.pats.vert || null },
+              { k: "diag", label: "Diagonal", prize: "camiseta Spincycle", best: AW2.pats.diag || null },
+              { k: "corners", label: "4 Cantos", prize: "bolsinha Spincycle", best: AW2.pats.corners || null },
+              { k: "conv", label: "4 Conversões", prize: "escolha da aula temática (independe de missões)", best: AW2.pats.conv || null },
+              { k: "full", label: "Cartela Cheia", prize: "treinamento + 1 mês de aula ilimitado", best: AW2.pats.full || null },
+              { k: "bpm", label: "Giro de 175 BPM", prize: "Desafio Plus: aula fechada (sáb ou dom) para 33 convidados", best: AW2.pats.bpm || null },
             ];
             return (
               <section className="rounded-xl p-4 mt-3" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
@@ -1935,24 +2105,53 @@ export default function App() {
                   Máx. 2 shakes e 1 prêmio de linha (horizontal/vertical/diagonal) por aluno — o excedente passa ao próximo da fila.
                 </div>
                 <div className="flex flex-col gap-2">
-                  {PRIZES.map((p) => (
-                    <div key={p.label} className="flex items-center gap-2">
+                  {PRIZES.map((p) => {
+                    const dk = `p:${p.k}`;
+                    return (
+                    <div key={p.k} className="flex items-center gap-2">
                       <div className="shrink-0" style={{ width: 100, fontSize: 11, fontWeight: 700, color: p.best ? C.cream : C.mut, textTransform: "uppercase", lineHeight: 1.2 }}>
                         {p.label}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="truncate" style={{ fontSize: 12, color: p.best ? (p.label === "Giro de 175 BPM" ? C.oak : C.amber) : C.mut, fontWeight: p.best ? 700 : 400 }}>
-                          {p.best ? p.best.name : "em aberto"}
-                        </div>
+                        {admin && addOpen === dk && !p.best ? (
+                          <select autoFocus defaultValue="" onChange={(e) => e.target.value && addWinManual("p", p.k, e.target.value)}
+                            className="w-full rounded px-2 py-1 outline-none" style={{ background: C.panelSoft, border: `1px solid ${C.amber}`, color: C.cream, fontSize: 12 }}>
+                            <option value="" disabled>Premiar aluno…</option>
+                            {data.students.filter((s) => s.approved !== false).sort((a, b) => a.name.localeCompare(b.name)).map((s) => (
+                              <option key={s.id} value={s.id}>{s.name}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <div className="truncate" style={{ fontSize: 12, color: p.best ? (p.k === "bpm" ? C.oak : C.amber) : C.mut, fontWeight: p.best ? 700 : 400 }}>
+                            {p.best ? p.best.name : "em aberto"}
+                          </div>
+                        )}
                         <div style={{ fontSize: 10, color: C.mut }}>{p.prize}</div>
                       </div>
-                      {p.best && (
+                      {p.best && confirmDel !== dk && (
                         <div className="shrink-0" style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: C.mut }}>
                           {p.best.reg ? fmtTs(p.best.reg) : p.best.ts ? fmtTs(p.best.ts) : fmtBR(p.best.date)}
                         </div>
                       )}
+                      {admin && p.best && confirmDel !== dk && (
+                        <button onClick={() => setConfirmDel(dk)} className="shrink-0 rounded px-1.5" title="Excluir conquista"
+                          style={{ color: "#C96A76", fontSize: 12, border: `1px solid ${C.line}` }}>✕</button>
+                      )}
+                      {admin && p.best && confirmDel === dk && (
+                        <div className="shrink-0 flex items-center gap-1">
+                          <span style={{ color: "#C96A76", fontSize: 9.5, fontWeight: 700 }}>Irreversível!</span>
+                          <button onClick={() => { delWin("p", p.k, p.best.id); setConfirmDel(""); }}
+                            className="rounded px-1.5 py-0.5 font-bold" style={{ background: "#B15560", color: C.cream, fontSize: 10 }}>SIM</button>
+                          <button onClick={() => setConfirmDel("")} className="rounded px-1.5 py-0.5" style={{ color: C.mut, fontSize: 10, border: `1px solid ${C.line}` }}>não</button>
+                        </div>
+                      )}
+                      {admin && !p.best && (
+                        <button onClick={() => setAddOpen(addOpen === dk ? "" : dk)} className="shrink-0 rounded px-1.5" title="Premiar manualmente"
+                          style={{ color: C.oak, fontSize: 12, border: `1px solid ${C.line}` }}>{addOpen === dk ? "✕" : "＋"}</button>
+                      )}
                     </div>
-                  ))}
+                    );
+                  })}
 
                 </div>
               </section>
@@ -2781,7 +2980,7 @@ export default function App() {
                 >Cancelar</button>
                 <button
                   onClick={() => {
-                    mutate((d) => { d.students = d.students.filter((x) => x.id !== view); });
+                    mutate((d) => { purgeStudentWins(d, view); d.students = d.students.filter((x) => x.id !== view); });
                     setConfirmRemove(false);
                     setView(null);
                   }}
