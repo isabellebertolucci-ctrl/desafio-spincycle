@@ -644,7 +644,7 @@ export default function App() {
   const [showAllHist, setShowAllHist] = useState(false);
   const [showAllRank, setShowAllRank] = useState(false);
   const [showManual, setShowManual] = useState(false);
-  const [mm, setMm] = useState({ name: "", start: todayStr(), end: todayStr(), desc: "", prize: "", qty: 1, mode: "manual", slots: [], answersText: "", optionsText: "", correct: "", tries: 3 });
+  const [mm, setMm] = useState({ name: "", start: todayStr(), end: todayStr(), desc: "", prize: "", qty: 1, mode: "manual", slots: [], answersText: "", optionsText: "", correct: "", tries: 3, scope: "este" });
   const [qzAns, setQzAns] = useState({});
   const [qzMsg, setQzMsg] = useState({});
   const [mmMsg, setMmMsg] = useState("");
@@ -669,6 +669,9 @@ export default function App() {
   const [cadQ, setCadQ] = useState("");
   const [editC, setEditC] = useState(null);
   const [expC, setExpC] = useState(null);
+  const [spy, setSpy] = useState(false);
+  const [editH, setEditH] = useState(null);
+  const [editN, setEditN] = useState(null);
   const [obsDraft, setObsDraft] = useState("");
   const [allData, setAllData] = useState({});
   const [showPend, setShowPend] = useState(false);
@@ -1261,6 +1264,13 @@ export default function App() {
                               s2.name = nm;
                               if (ph) s2.phone = ph; else delete s2.phone;
                               if (pw) s2.pass = pw;
+                              const fix = (e) => { if (e && e.id === editC.sid) e.name = nm; };
+                              const w = d.winners || {};
+                              Object.values(w.missions || {}).forEach(fix);
+                              Object.values(w.patterns || {}).forEach(fix);
+                              Object.values(w.missionQueues || {}).forEach((q) => (q || []).forEach(fix));
+                              Object.values(w.placements || {}).forEach((q) => (q || []).forEach(fix));
+                              (d.miniMissions || []).forEach((x) => (x.winners || []).forEach(fix));
                             });
                             setEditC(null);
                           }}
@@ -1396,7 +1406,11 @@ export default function App() {
             <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, letterSpacing: "0.35em", color: C.oak, textTransform: "uppercase" }}>
               Spincycle Prudente
             </div>
-            <h1 style={{ fontFamily: "'Montserrat', sans-serif", fontWeight: 800, fontSize: 34, letterSpacing: "0.04em", color: C.cream, textTransform: "uppercase", lineHeight: 1.05, marginTop: 6 }}>
+            <h1
+              onClick={() => { setView(null); setSpy(false); setShowManual(false); setShowPend(false); setShowCad(false); setShowEntry(false); setLoginMode(false); setShowSignup(false); setRecMode(false); setData(null); setTrack(null); }}
+              title="Voltar ao início"
+              style={{ fontFamily: "'Montserrat', sans-serif", fontWeight: 800, fontSize: 34, letterSpacing: "0.04em", color: C.cream, textTransform: "uppercase", lineHeight: 1.05, marginTop: 6, cursor: "pointer" }}
+            >
               Desafio das <span style={{ color: C.amber, textShadow: `0 0 24px ${C.amber}66` }}>Missões</span>
             </h1>
             <div className="mx-auto mt-4" style={{ width: 56, height: 3, background: `linear-gradient(90deg, ${C.amber}, ${C.amberSoft})`, borderRadius: 2 }} />
@@ -1858,7 +1872,7 @@ export default function App() {
       const sid = myIds[track];
       const s = sid ? data.students.find((x) => x.id === sid) : null;
       if (s && s.pass && unlocks[s.id] === s.pass) {
-        setShowEntry(false);
+        setShowEntry(false); setSpy(false);
         setView(s.id); setDetailMission(null); setShowAllHist(false); setConfirmRemove(false);
       } else {
         setLoginName(s ? s.name : ""); setLoginPass(""); setLoginErr("");
@@ -1972,7 +1986,7 @@ export default function App() {
       if (!s) { setLoginErr("Nome não encontrado. Digite igual ao cadastro (nome e sobrenome)."); return; }
       if (s.approved === false) { setLoginErr("Seu cadastro ainda aguarda liberação da recepção."); return; }
       if (!s.pass) {
-        setLoginMode(false); setLoginPass(""); setLoginErr("");
+        setLoginMode(false); setLoginPass(""); setLoginErr(""); setSpy(false);
         setView(s.id); setDetailMission(null); setShowAllHist(false); setConfirmRemove(false);
         return;
       }
@@ -2096,7 +2110,7 @@ export default function App() {
                     const nu = { ...unlocks, [s.id]: pw }; setUnlocks(nu); saveUnlocks(nu);
                     const nm = { ...myIds, [track]: s.id }; setMyIds(nm); saveMyIds(nm);
                     setRecMode(false); setRcName(""); setRcPhone(""); setRcPass(""); setRcStep(1);
-                    setLoginMode(false);
+                    setLoginMode(false); setSpy(false);
                     setView(s.id); setDetailMission(null); setShowAllHist(false); setConfirmRemove(false);
                   }}
                   className="w-full rounded-lg py-3 font-bold"
@@ -2126,8 +2140,12 @@ export default function App() {
   if (!student) {
     const ranked = data.students
       .filter((s) => s.approved !== false)
-      .map((s) => ({ s, r: computeProgress(s) }))
-      .sort((a, b) => b.r.doneCount - a.r.doneCount || b.r.p.maratona - a.r.p.maratona);
+      .map((s) => {
+        const r = computeProgress(s);
+        const feito = MISSIONS.reduce((n, m) => n + Math.min(r.p[m.id], m.target), 0);
+        return { s, r, feito };
+      })
+      .sort((a, b) => b.feito - a.feito || b.r.doneCount - a.r.doneCount || b.r.p.maratona - a.r.p.maratona || a.s.name.localeCompare(b.s.name));
     const totalPending = ranked.reduce((n, x) => n + x.r.pending, 0);
 
     return (
@@ -2145,7 +2163,11 @@ export default function App() {
             <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, letterSpacing: "0.35em", color: C.oak, textTransform: "uppercase" }}>
               Spincycle Prudente
             </div>
-            <h1 style={{ fontFamily: "'Montserrat', sans-serif", fontWeight: 800, fontSize: 34, letterSpacing: "0.04em", color: C.cream, textTransform: "uppercase", lineHeight: 1.05, marginTop: 6 }}>
+            <h1
+              onClick={() => { setView(null); setSpy(false); setShowManual(false); setShowPend(false); setShowCad(false); setShowEntry(false); setLoginMode(false); setShowSignup(false); setRecMode(false); setData(null); setTrack(null); }}
+              title="Voltar ao início"
+              style={{ fontFamily: "'Montserrat', sans-serif", fontWeight: 800, fontSize: 34, letterSpacing: "0.04em", color: C.cream, textTransform: "uppercase", lineHeight: 1.05, marginTop: 6, cursor: "pointer" }}
+            >
               Desafio das <span style={{ color: C.amber, textShadow: `0 0 24px ${C.amber}66` }}>Missões</span>
             </h1>
             <div className="mx-auto mt-4" style={{ width: 56, height: 3, background: `linear-gradient(90deg, ${C.amber}, ${C.amberSoft})`, borderRadius: 2 }} />
@@ -2168,9 +2190,14 @@ export default function App() {
             {(showAllRank ? ranked : ranked.slice(0, 5)).map(({ s, r }, i) => (
               <button
                 key={s.id}
-                onClick={() => { if (!admin) return; setView(s.id); setDetailMission(null); setShowAllHist(false); setConfirmRemove(false); }}
+                onClick={() => {
+                  const dono = admin || (s.pass && unlocks[s.id] === s.pass);
+                  setSpy(!dono);
+                  setView(s.id); setDetailMission(null); setShowAllHist(false); setConfirmRemove(false);
+                  window.scrollTo({ top: 0 });
+                }}
                 className="rounded-xl px-4 py-3 flex items-center gap-3 text-left"
-                style={{ background: C.panel, border: `1px solid ${r.full ? C.amber : C.line}`, cursor: admin ? "pointer" : "default" }}
+                style={{ background: C.panel, border: `1px solid ${r.full ? C.amber : C.line}`, cursor: "pointer" }}
               >
                 {(() => {
                   const medal = r.doneCount > 0 && i < 3 ? [
@@ -2299,6 +2326,11 @@ export default function App() {
                   <option value="quizText">✍️ Quiz — a pessoa digita a resposta</option>
                   <option value="quizChoice">❓ Quiz — lista suspensa de opções</option>
                 </select>
+                <select value={mm.scope} onChange={(e) => setMm({ ...mm, scope: e.target.value })}
+                  className="rounded-lg px-3 py-2 outline-none" style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream }}>
+                  <option value="este">🎯 Só para este desafio ({(TRACKS.find((t) => t.id === track) || {}).short})</option>
+                  <option value="todos">🌍 Para os 3 desafios (prêmios contam por grupo)</option>
+                </select>
                 {mm.mode === "slot" && (
                   <div className="flex flex-wrap gap-1.5">
                     {[...WEEKDAY_SLOTS, ...WEEKEND_SLOTS].map((sl) => {
@@ -2364,9 +2396,17 @@ export default function App() {
                       mode: mm.mode, slots: mm.slots, winners: [],
                       answers, options, correct: mm.correct, tries: mm.tries, attempts: {},
                     };
-                    mutate((d) => { if (!d.miniMissions) d.miniMissions = []; d.miniMissions.push(nova); });
-                    setMm({ name: "", start: todayStr(), end: todayStr(), desc: "", prize: "", qty: 1, mode: "manual", slots: [], answersText: "", optionsText: "", correct: "", tries: 3 });
-                    setMmMsg("⚡ Missão criada! Já está visível na cartela dos alunos.");
+                    if (mm.scope === "todos") {
+                      nova.scope = "todos";
+                      TRACKS.forEach((t) => mutateTrack(t.id, (d) => {
+                        if (!d.miniMissions) d.miniMissions = [];
+                        d.miniMissions.push(JSON.parse(JSON.stringify(nova)));
+                      }));
+                    } else {
+                      mutate((d) => { if (!d.miniMissions) d.miniMissions = []; d.miniMissions.push(nova); });
+                    }
+                    setMm({ name: "", start: todayStr(), end: todayStr(), desc: "", prize: "", qty: 1, mode: "manual", slots: [], answersText: "", optionsText: "", correct: "", tries: 3, scope: "este" });
+                    setMmMsg(mm.scope === "todos" ? "⚡🌍 Missão criada nos 3 desafios!" : "⚡ Missão criada! Já está visível na cartela dos alunos.");
                     setTimeout(() => setMmMsg(""), 3500);
                   }}
                   className="rounded-lg py-2.5 font-bold" style={{ background: `linear-gradient(120deg, ${C.amber}, #16696F)`, color: C.cream }}>
@@ -2382,7 +2422,7 @@ export default function App() {
                 return (
                   <div key={x.id} className="rounded-lg p-3 mt-3" style={{ background: C.panelSoft, border: `1px solid ${ativa ? C.amber + "88" : C.line}` }}>
                     <div className="flex items-center justify-between gap-2">
-                      <div style={{ color: C.cream, fontWeight: 800, fontSize: 13 }}>⚡ {x.name}</div>
+                      <div style={{ color: C.cream, fontWeight: 800, fontSize: 13 }}>⚡ {x.scope === "todos" ? "🌍 " : ""}{x.name}</div>
                       <div style={{ color: ativa ? C.amberSoft : C.mut, fontSize: 11 }}>
                         {ativa
                           ? (x.start && x.start > todayStr() ? `⏳ começa ${fmtBR(x.start)}`
@@ -2639,7 +2679,7 @@ export default function App() {
                           return (
                             <div key={x.id} className="flex items-center gap-2">
                               <div className="shrink-0" style={{ width: 100, fontSize: 11, fontWeight: 700, color: ws.length ? C.cream : C.mut, textTransform: "uppercase", lineHeight: 1.2 }}>
-                                ⚡ {x.name}
+                                ⚡ {x.scope === "todos" ? "🌍 " : ""}{x.name}
                               </div>
                               <div className="flex-1 min-w-0">
                                 <div style={{ fontSize: 12, color: ws.length ? C.amber : C.mut, fontWeight: ws.length ? 700 : 400, lineHeight: 1.4 }}>
@@ -2749,7 +2789,7 @@ export default function App() {
   }
 
   // ---------- Portão de senha da cartela ----------
-  if (!admin && !(student.pass && unlocks[student.id] === student.pass)) {
+  if (!admin && !spy && !(student.pass && unlocks[student.id] === student.pass)) {
     const creating = !student.pass;
     const tryEnter = () => {
       const pw = gatePass.trim();
@@ -2830,15 +2870,66 @@ export default function App() {
       {fonts}{modal}
       <main className="max-w-md mx-auto px-5 pb-16 pt-6">
         <div className="flex items-center justify-between">
-          <button onClick={() => setView(null)} style={{ color: C.oak, fontSize: 13 }}>← Ranking</button>
+          <button onClick={() => { setView(null); setSpy(false); }} style={{ color: C.oak, fontSize: 13 }}>← Ranking</button>
           {lockBtn}
         </div>
 
-        <div className="mt-4 mb-1 flex items-end justify-between">
-          <h2 style={{ fontFamily: "'Montserrat', sans-serif", fontWeight: 800, fontSize: 26, color: C.amberSoft, textTransform: "uppercase", letterSpacing: "0.03em" }}>
-            {student.name}
-          </h2>
-          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 12, color: res.full ? C.amber : C.mut }}>
+        {!admin && spy && !(student.pass && unlocks[student.id] === student.pass) && (
+          <div className="rounded-xl px-4 py-3 mt-4" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+            <div style={{ color: C.cream, fontSize: 12.5, lineHeight: 1.55 }}>
+              👀 Você está <b>visitando</b> a cartela de {student.name.split(" ")[0]} — pode espiar tudo, mas só o dono registra aulas aqui. 😄
+            </div>
+            <button
+              onClick={() => { setSpy(false); setView(null); setShowEntry(true); window.scrollTo({ top: 0 }); }}
+              className="mt-2 rounded-lg px-3 py-1.5 font-bold"
+              style={{ background: `linear-gradient(120deg, ${C.amber}, #16696F)`, color: C.cream, fontSize: 12 }}
+            >
+              🚴 Entrar nas MINHAS missões
+            </button>
+          </div>
+        )}
+        <div className="mt-4 mb-1 flex items-end justify-between gap-2">
+          {admin && editN ? (
+            <div className="flex-1 flex items-center gap-1.5">
+              <input
+                autoFocus
+                value={editN.name}
+                onChange={(e) => setEditN({ name: e.target.value })}
+                className="flex-1 rounded px-2 py-1.5 outline-none"
+                style={{ background: C.panel, border: `1px solid ${C.amber}`, color: C.cream, fontSize: 16, fontWeight: 800 }}
+              />
+              <button
+                onClick={() => {
+                  const nm = editN.name.trim().replace(/\s+/g, " ");
+                  if (nm.split(" ").filter((w) => w.length >= 2).length < 2) { avisar("Digite nome e sobrenome."); return; }
+                  if (data.students.some((x) => x.id !== view && norm(x.name) === norm(nm))) { avisar("⚠️ Já existe um aluno com esse nome neste desafio."); return; }
+                  mutate((d) => {
+                    const s2 = d.students.find((x) => x.id === view);
+                    if (!s2) return;
+                    s2.name = nm;
+                    const fix = (e) => { if (e && e.id === view) e.name = nm; };
+                    const w = d.winners || {};
+                    Object.values(w.missions || {}).forEach(fix);
+                    Object.values(w.patterns || {}).forEach(fix);
+                    Object.values(w.missionQueues || {}).forEach((q) => (q || []).forEach(fix));
+                    Object.values(w.placements || {}).forEach((q) => (q || []).forEach(fix));
+                    (d.miniMissions || []).forEach((x) => (x.winners || []).forEach(fix));
+                  });
+                  setEditN(null);
+                }}
+                className="rounded px-2 py-1 font-bold" style={{ background: C.ok, color: C.bg, fontSize: 12 }}>✓</button>
+              <button onClick={() => setEditN(null)} className="rounded px-2 py-1" style={{ color: C.mut, fontSize: 12, border: `1px solid ${C.line}` }}>✕</button>
+            </div>
+          ) : (
+            <h2 style={{ fontFamily: "'Montserrat', sans-serif", fontWeight: 800, fontSize: 26, color: C.amberSoft, textTransform: "uppercase", letterSpacing: "0.03em" }}>
+              {student.name}
+              {admin && (
+                <button onClick={() => setEditN({ name: student.name })} title="Corrigir nome do aluno"
+                  style={{ background: "transparent", border: "none", fontSize: 14, cursor: "pointer", marginLeft: 6, opacity: 0.8 }}>✏️</button>
+              )}
+            </h2>
+          )}
+          <div className="shrink-0" style={{ fontFamily: "'DM Mono', monospace", fontSize: 12, color: res.full ? C.amber : C.mut }}>
             {res.doneCount}/9
           </div>
         </div>
@@ -2910,7 +3001,7 @@ export default function App() {
           );
         })()}
 
-        {!admin && !student.phone && (
+        {!admin && !spy && !student.phone && (
           <div className="rounded-xl p-3 mb-3" style={{ background: C.panel, border: `1.5px solid ${C.oak}`, boxShadow: `0 0 12px ${C.oak}33` }}>
             <div style={{ color: C.oak, fontWeight: 800, fontSize: 11.5, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>
               📱 Complete seu cadastro
@@ -3022,7 +3113,7 @@ export default function App() {
                       </div>
                     ) : null;
                   })()}
-                  {(x.mode === "quizText" || x.mode === "quizChoice") && !admin && (() => {
+                  {(x.mode === "quizText" || x.mode === "quizChoice") && !admin && student.pass && unlocks[student.id] === student.pass && (() => {
                     const at = (x.attempts || {})[student.id] || { n: 0, ok: false };
                     const tries = x.tries || 3;
                     if (at.ok) {
@@ -3159,7 +3250,7 @@ export default function App() {
         </div>
 
         {/* Registrar aula */}
-        {student.approved !== false && (
+        {(admin || (student.pass && unlocks[student.id] === student.pass)) && student.approved !== false && (
         <section className="rounded-xl p-4 mt-6" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
           <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, letterSpacing: "0.25em", color: C.oak, textTransform: "uppercase", marginBottom: 10 }}>
             {admin ? "Registrar aula (validada)" : "Registrar minha aula"}
@@ -3377,20 +3468,24 @@ export default function App() {
                       style={{ background: C.ok, color: C.bg, fontSize: 12 }}
                     >✓</button>
                   )}
-                  {admin && (
-                    <button
-                      onClick={() => mutate((d) => {
-                        const s = d.students.find((x) => x.id === view);
-                        s.guests = s.guests.filter((x) => x.id !== g.id);
-                      })}
-                      style={{ color: C.mut, fontSize: 12 }}
-                    >✕</button>
+                  {admin && confirmDel !== `hg:${g.id}` && (
+                    <button onClick={() => setConfirmDel(`hg:${g.id}`)} style={{ color: C.mut, fontSize: 12 }}>✕</button>
+                  )}
+                  {admin && confirmDel === `hg:${g.id}` && (
+                    <div className="shrink-0 flex items-center gap-1">
+                      <span style={{ color: "#C96A76", fontSize: 9.5, fontWeight: 700 }}>Irreversível!</span>
+                      <button
+                        onClick={() => { mutate((d) => { const s = d.students.find((x) => x.id === view); s.guests = s.guests.filter((x) => x.id !== g.id); }); setConfirmDel(""); }}
+                        className="rounded px-1.5 py-0.5 font-bold" style={{ background: "#B15560", color: C.cream, fontSize: 10 }}>SIM</button>
+                      <button onClick={() => setConfirmDel("")} className="rounded px-1.5 py-0.5" style={{ color: C.mut, fontSize: 10, border: `1px solid ${C.line}` }}>não</button>
+                    </div>
                   )}
                 </div>
               ))}
             </div>
           )}
 
+          {(admin || (student.pass && unlocks[student.id] === student.pass)) && (
           <div className="flex flex-col gap-2">
             <input
               value={gform.name}
@@ -3434,6 +3529,7 @@ export default function App() {
               </div>
             )}
           </div>
+          )}
         </section>
         )}
 
@@ -3444,42 +3540,97 @@ export default function App() {
           </div>
           {recsSorted.length === 0 && <p style={{ color: C.mut, fontSize: 13 }}>Nenhuma aula registrada ainda.</p>}
           <div className="flex flex-col gap-1">
-            {(showAllHist ? recsSorted : recsSorted.slice(0, 5)).map((r) => (
-              <div key={r.id} className="rounded-lg px-3 py-2 flex items-center gap-2" style={{
+            {(showAllHist ? recsSorted : recsSorted.slice(0, 5)).map((r) => {
+              const emEd = editH && editH.id === r.id;
+              const slotsEd = emEd && editH.date && isWeekendDate(editH.date) ? WEEKEND_SLOTS : WEEKDAY_SLOTS;
+              return (
+              <div key={r.id} className="rounded-lg px-3 py-2" style={{
                 background: C.panel,
                 border: `1px solid ${r.status === "pending" ? C.amber + "66" : C.line}`,
               }}>
-                <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 12, color: r.status === "pending" ? C.amberSoft : C.cream, minWidth: 96 }}>
-                  {weekdayBR(r.date)} {fmtBR(r.date)} · {r.slot.replace(":", "h")}
+                <div className="flex items-center gap-2">
+                  <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 12, color: r.status === "pending" ? C.amberSoft : C.cream, minWidth: 96 }}>
+                    {weekdayBR(r.date)} {fmtBR(r.date)} · {r.slot.replace(":", "h")}
+                  </div>
+                  <div className="flex-1 min-w-0 truncate" style={{ color: C.mut, fontSize: 13 }}>{r.instructor || "—"}</div>
+                  {r.status === "pending" && !emEd && (
+                    <span className="rounded px-1.5 py-0.5 shrink-0" style={{ fontSize: 10, background: C.wineDeep, color: C.amberSoft }}>
+                      pendente
+                    </span>
+                  )}
+                  {admin && r.status === "pending" && !emEd && confirmDel !== `hr:${r.id}` && (
+                    <button
+                      onClick={() => mutate((d) => {
+                        const s = d.students.find((x) => x.id === view);
+                        const rec = s.records.find((x) => x.id === r.id);
+                        rec.status = "ok";
+                      })}
+                      className="rounded px-2 py-1 shrink-0 font-bold"
+                      style={{ background: C.ok, color: C.bg, fontSize: 12 }}
+                    >✓</button>
+                  )}
+                  {admin && !emEd && confirmDel !== `hr:${r.id}` && (
+                    <button
+                      onClick={() => { setEditH({ id: r.id, date: r.date, slot: r.slot, instructor: r.instructor }); setConfirmDel(""); }}
+                      className="shrink-0 rounded px-1" title="Corrigir data/horário/professor"
+                      style={{ background: "transparent", border: "none", fontSize: 13, cursor: "pointer", opacity: 0.8 }}
+                    >✏️</button>
+                  )}
+                  {admin && !emEd && confirmDel !== `hr:${r.id}` && (
+                    <button onClick={() => setConfirmDel(`hr:${r.id}`)} className="shrink-0" style={{ color: C.mut, fontSize: 12 }}>✕</button>
+                  )}
+                  {admin && confirmDel === `hr:${r.id}` && (
+                    <div className="shrink-0 flex items-center gap-1">
+                      <span style={{ color: "#C96A76", fontSize: 9.5, fontWeight: 700 }}>Irreversível!</span>
+                      <button
+                        onClick={() => { mutate((d) => { const s = d.students.find((x) => x.id === view); s.records = s.records.filter((x) => x.id !== r.id); }); setConfirmDel(""); }}
+                        className="rounded px-1.5 py-0.5 font-bold" style={{ background: "#B15560", color: C.cream, fontSize: 10 }}>SIM</button>
+                      <button onClick={() => setConfirmDel("")} className="rounded px-1.5 py-0.5" style={{ color: C.mut, fontSize: 10, border: `1px solid ${C.line}` }}>não</button>
+                    </div>
+                  )}
                 </div>
-                <div className="flex-1 min-w-0 truncate" style={{ color: C.mut, fontSize: 13 }}>{r.instructor || "—"}</div>
-                {r.status === "pending" && (
-                  <span className="rounded px-1.5 py-0.5 shrink-0" style={{ fontSize: 10, background: C.wineDeep, color: C.amberSoft }}>
-                    pendente
-                  </span>
-                )}
-                {admin && r.status === "pending" && (
-                  <button
-                    onClick={() => mutate((d) => {
-                      const s = d.students.find((x) => x.id === view);
-                      const rec = s.records.find((x) => x.id === r.id);
-                      rec.status = "ok";
-                    })}
-                    className="rounded px-2 py-1 shrink-0 font-bold"
-                    style={{ background: C.ok, color: C.bg, fontSize: 12 }}
-                  >✓</button>
-                )}
-                {admin && (
-                  <button
-                    onClick={() => mutate((d) => {
-                      const s = d.students.find((x) => x.id === view);
-                      s.records = s.records.filter((x) => x.id !== r.id);
-                    })}
-                    style={{ color: C.mut, fontSize: 12 }}
-                  >✕</button>
+                {emEd && (
+                  <div className="mt-2 flex flex-col gap-1.5">
+                    <div className="flex gap-1.5">
+                      <input type="date" value={editH.date} min={DESAFIO_INICIO} max={todayStr()}
+                        onChange={(e) => {
+                          const nd = e.target.value;
+                          const vs = nd && isWeekendDate(nd) ? WEEKEND_SLOTS : WEEKDAY_SLOTS;
+                          setEditH({ ...editH, date: nd, slot: vs.includes(editH.slot) ? editH.slot : "" });
+                        }}
+                        className="flex-1 rounded px-2 py-1.5 outline-none"
+                        style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream, fontSize: 12, colorScheme: "dark" }} />
+                      <select value={editH.slot} onChange={(e) => setEditH({ ...editH, slot: e.target.value })}
+                        className="rounded px-2 py-1.5 outline-none"
+                        style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: editH.slot ? C.cream : C.mut, fontSize: 12 }}>
+                        <option value="" disabled>— horário —</option>
+                        {slotsEd.map((sl) => <option key={sl} value={sl}>{sl.replace(":", "h")}</option>)}
+                      </select>
+                    </div>
+                    <div className="flex gap-1.5">
+                      <select value={editH.instructor} onChange={(e) => setEditH({ ...editH, instructor: e.target.value })}
+                        className="flex-1 rounded px-2 py-1.5 outline-none"
+                        style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream, fontSize: 12 }}>
+                        {INSTRUCTORS.map((i) => <option key={i} value={i}>{i}</option>)}
+                      </select>
+                      <button
+                        onClick={() => {
+                          if (!editH.date || !editH.slot) { avisar("Escolha data e horário."); return; }
+                          mutate((d) => {
+                            const s = d.students.find((x) => x.id === view);
+                            const rec = s && (s.records || []).find((x) => x.id === editH.id);
+                            if (rec) { rec.date = editH.date; rec.slot = editH.slot; rec.instructor = editH.instructor; }
+                          });
+                          setEditH(null);
+                        }}
+                        className="rounded px-2.5 font-bold" style={{ background: C.ok, color: C.bg, fontSize: 12 }}>✓ salvar</button>
+                      <button onClick={() => setEditH(null)} className="rounded px-2" style={{ color: C.mut, fontSize: 12, border: `1px solid ${C.line}` }}>✕</button>
+                    </div>
+                  </div>
                 )}
               </div>
-            ))}
+              );
+            })}
           </div>
 
           {recsSorted.length > 5 && (
