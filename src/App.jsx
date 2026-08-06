@@ -665,6 +665,11 @@ export default function App() {
   const [editG, setEditG] = useState(null);
   const [editP, setEditP] = useState(null);
   const [trackCounts, setTrackCounts] = useState({});
+  const [showCad, setShowCad] = useState(false);
+  const [cadQ, setCadQ] = useState("");
+  const [editC, setEditC] = useState(null);
+  const [expC, setExpC] = useState(null);
+  const [obsDraft, setObsDraft] = useState("");
   const [allData, setAllData] = useState({});
   const [showPend, setShowPend] = useState(false);
   const [showEntry, setShowEntry] = useState(false);
@@ -1150,6 +1155,236 @@ export default function App() {
     );
   }
 
+  // ---------- Cadastros (administração) ----------
+  if (showCad && admin) {
+    const rows = [];
+    TRACKS.forEach((t) => {
+      const d = allData[t.id];
+      if (d) d.students.forEach((s) => rows.push({ t, s }));
+    });
+    rows.sort((a, b) => norm(a.s.name).localeCompare(norm(b.s.name)));
+    const qTxt = norm(cadQ);
+    const qNum = cadQ.replace(/\D/g, "");
+    const filtrados = qTxt
+      ? rows.filter(({ s }) => norm(s.name).includes(qTxt) || (qNum.length >= 2 && normPhone(s.phone || "").includes(qNum)))
+      : rows;
+    const semZap = rows.filter(({ s }) => !s.phone).length;
+    return (
+      <div className="min-h-screen" style={{ ...pageVars, background: pageBg, fontFamily: "'Montserrat', sans-serif", transition: "background .4s" }}>
+        {fonts}{modal}
+        <main className="max-w-md mx-auto px-5 pb-16 pt-6">
+          <div className="flex items-center justify-between">
+            <button onClick={() => { setShowCad(false); setEditC(null); }} style={{ color: C.oak, fontSize: 13 }}>← Voltar</button>
+            {lockBtn}
+          </div>
+          <h2 className="mt-4 mb-1" style={{ fontWeight: 800, fontSize: 22, color: C.amber, textTransform: "uppercase", letterSpacing: "0.03em" }}>
+            👥 Cadastros
+          </h2>
+          <div style={{ color: C.mut, fontSize: 12, marginBottom: 10 }}>
+            {rows.length} aluno{rows.length === 1 ? "" : "s"} nos 3 desafios, em ordem alfabética
+            {semZap > 0 && <span style={{ color: C.oak }}> · {semZap} sem WhatsApp</span>}
+          </div>
+          <input
+            value={cadQ}
+            onChange={(e) => setCadQ(e.target.value)}
+            placeholder="🔍 Buscar por nome ou telefone…"
+            className="w-full rounded-lg px-4 py-2.5 outline-none mb-3"
+            style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.cream, fontSize: 13 }}
+          />
+          <div className="flex flex-col gap-1.5">
+            {filtrados.length === 0 && (
+              <div className="text-center py-6" style={{ color: C.mut, fontSize: 13 }}>Nenhum cadastro encontrado.</div>
+            )}
+            {filtrados.map(({ t, s }) => {
+              const em = editC && editC.tid === t.id && editC.sid === s.id;
+              return (
+                <div key={t.id + s.id} className="rounded-lg px-3 py-2" style={{ background: C.panel, border: `1px solid ${em ? C.amber : C.line}` }}>
+                  {!em ? (
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="truncate" style={{ color: C.cream, fontWeight: 700, fontSize: 13 }}>
+                          {s.name}
+                          {s.approved === false && <span className="ml-1" style={{ color: C.amberSoft, fontSize: 10 }}>⏳</span>}
+                        </div>
+                        <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 10.5, color: C.mut }}>
+                          {t.short || t.label}
+                          {s.phone
+                            ? <a href={`https://wa.me/55${normPhone(s.phone)}`} target="_blank" rel="noreferrer" style={{ color: C.amberSoft, textDecoration: "underline", textUnderlineOffset: 2 }}> · 📱 {fmtPhone(s.phone)}</a>
+                            : <span style={{ color: C.oak, fontWeight: 700 }}> · sem WhatsApp</span>}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => setEditC({ tid: t.id, sid: s.id, name: s.name, phone: s.phone ? normPhone(s.phone) : "", pass: s.pass || "" })}
+                        className="shrink-0 rounded px-1" title="Editar nome, WhatsApp e senha"
+                        style={{ background: "transparent", border: "none", fontSize: 13, cursor: "pointer", opacity: 0.8 }}
+                      >✏️</button>
+                      <button
+                        onClick={() => {
+                          const k = t.id + ":" + s.id;
+                          if (expC === k) { setExpC(null); } else { setExpC(k); setObsDraft(s.notes || ""); }
+                        }}
+                        className="shrink-0 rounded px-1" title="Ver desempenho e observações"
+                        style={{ background: "transparent", border: "none", fontSize: 13, cursor: "pointer", opacity: 0.85 }}
+                      >{expC === t.id + ":" + s.id ? "▾" : "📊"}</button>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-1.5">
+                      <input value={editC.name} autoFocus
+                        onChange={(e) => setEditC({ ...editC, name: e.target.value })}
+                        placeholder="Nome e sobrenome"
+                        className="rounded px-2.5 py-1.5 outline-none"
+                        style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream, fontSize: 13 }} />
+                      <input type="tel" inputMode="numeric" value={editC.phone}
+                        onChange={(e) => setEditC({ ...editC, phone: e.target.value.replace(/\D/g, "").replace(/^0+/, "").slice(0, 11) })}
+                        placeholder="WhatsApp — só números (ex.: 18999342345)"
+                        className="rounded px-2.5 py-1.5 outline-none"
+                        style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream, fontSize: 13 }} />
+                      <input value={editC.pass}
+                        onChange={(e) => setEditC({ ...editC, pass: e.target.value })}
+                        placeholder="Senha (mín. 4) — vazio mantém a atual"
+                        className="rounded px-2.5 py-1.5 outline-none"
+                        style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream, fontSize: 13, fontFamily: "'DM Mono', monospace" }} />
+                      <div className="flex gap-1.5">
+                        <button
+                          onClick={() => {
+                            const nm = editC.name.trim().replace(/\s+/g, " ");
+                            if (nm.split(" ").filter((w) => w.length >= 2).length < 2) { avisar("Digite nome e sobrenome."); return; }
+                            const dAll = allData[editC.tid];
+                            if (dAll && dAll.students.some((x) => x.id !== editC.sid && norm(x.name) === norm(nm))) { avisar("⚠️ Já existe um aluno com esse nome neste desafio."); return; }
+                            const ph = normPhone(editC.phone);
+                            if (editC.phone && (ph.length < 10 || ph.length > 11)) { avisar("WhatsApp inválido — DDD + número, 10 ou 11 dígitos."); return; }
+                            const pw = editC.pass.trim();
+                            if (pw && pw.length < 4) { avisar("A senha precisa de pelo menos 4 caracteres."); return; }
+                            mutateTrack(editC.tid, (d) => {
+                              const s2 = d.students.find((x) => x.id === editC.sid);
+                              if (!s2) return;
+                              s2.name = nm;
+                              if (ph) s2.phone = ph; else delete s2.phone;
+                              if (pw) s2.pass = pw;
+                            });
+                            setEditC(null);
+                          }}
+                          className="flex-1 rounded px-2 py-1.5 font-bold" style={{ background: C.ok, color: C.bg, fontSize: 12 }}>✓ Salvar</button>
+                        <button onClick={() => setEditC(null)} className="rounded px-3" style={{ color: C.mut, fontSize: 12, border: `1px solid ${C.line}` }}>✕</button>
+                      </div>
+                    </div>
+                  )}
+                  {!em && expC === t.id + ":" + s.id && (() => {
+                    const prevM = MISSIONS;
+                    MISSIONS = TRACK_MISSIONS[t.id];
+                    const M = TRACK_MISSIONS[t.id];
+                    const r = computeProgress(s);
+                    const dTrack = allData[t.id];
+                    const AW = dTrack ? computeAwards(dTrack) : { shakes: {}, pats: {} };
+                    MISSIONS = prevM;
+                    const recsOk = (s.records || []).filter((x) => x.status === "ok");
+                    const pendN = (s.records || []).filter((x) => x.status === "pending").length;
+                    const dias = new Set(recsOk.map((x) => x.date)).size;
+                    const semanas = Math.max(1, Math.ceil((new Date(todayStr() + "T12:00") - new Date(DESAFIO_INICIO + "T12:00")) / (7 * 864e5)));
+                    const freq = (dias / semanas).toFixed(1).replace(".", ",");
+                    const porSlot = {};
+                    recsOk.forEach((x) => { porSlot[x.slot] = (porSlot[x.slot] || 0) + 1; });
+                    const porProf = {};
+                    recsOk.forEach((x) => { porProf[x.instructor] = (porProf[x.instructor] || 0) + 1; });
+                    const gs = s.guests || [];
+                    const gOk = gs.filter((g) => g.status === "ok").length;
+                    const gPend = gs.filter((g) => g.status === "pending").length;
+                    const gBought = gs.filter((g) => g.bought).length;
+                    const shakesGanhos = M.filter((m) => AW.shakes[m.id] && AW.shakes[m.id].id === s.id).map((m) => m.name);
+                    const PAT_LABELS = { horiz: "Horizontal", vert: "Vertical", diag: "Diagonal", corners: "4 Cantos", conv: "4 Conversões", full: "Cartela Cheia", bpm: "Giro de 175 BPM" };
+                    const patsGanhos = Object.keys(PAT_LABELS).filter((k) => AW.pats[k] && AW.pats[k].id === s.id).map((k) => PAT_LABELS[k]);
+                    const miniGanhas = (dTrack && dTrack.miniMissions || []).filter((x) => (x.winners || []).some((w) => w.id === s.id)).map((x) => x.name);
+                    const totalAlvo = M.reduce((n, m) => n + m.target, 0);
+                    const totalFeito = M.reduce((n, m) => n + Math.min(r.p[m.id], m.target), 0);
+                    const pctCaminho = Math.round((totalFeito / totalAlvo) * 100);
+                    const Sec = ({ children }) => (
+                      <div style={{ color: C.oak, fontWeight: 800, fontSize: 10.5, textTransform: "uppercase", letterSpacing: "0.12em", marginTop: 10, marginBottom: 3 }}>{children}</div>
+                    );
+                    const Row = ({ a, b, dim }) => (
+                      <div className="flex justify-between items-baseline" style={{ fontSize: 12, lineHeight: 1.8, color: dim ? C.mut : C.cream }}>
+                        <span>{a}</span>
+                        <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 11 }}>{b}</span>
+                      </div>
+                    );
+                    const conquistas = [
+                      ...shakesGanhos.map((n) => `🥤 Shake do Mês — ${n}`),
+                      ...patsGanhos.map((n) => `🏆 ${n}`),
+                      ...miniGanhas.map((n) => `⚡ Relâmpago — ${n}`),
+                    ];
+                    const aulasTxt = (n) => `${n} aula${n === 1 ? "" : "s"}`;
+                    return (
+                      <div className="mt-2 pt-1" style={{ borderTop: `1px dashed ${C.line}` }}>
+                        <Sec>🏅 Conquistas</Sec>
+                        {conquistas.length
+                          ? conquistas.map((c, i) => <div key={i} style={{ fontSize: 12, color: C.cream, lineHeight: 1.8 }}>{c}</div>)
+                          : <div style={{ fontSize: 12, color: C.mut }}>nenhuma ainda</div>}
+
+                        <Sec>📊 Progresso</Sec>
+                        <Row a="Missões concluídas" b={`${r.doneCount}/9 · ${Math.round((r.doneCount / 9) * 100)}%`} />
+                        <Row a="Caminho total percorrido" b={`${pctCaminho}%`} />
+
+                        <Sec>🚴 Frequência</Sec>
+                        <Row a="Aulas validadas" b={String(recsOk.length)} />
+                        {pendN > 0 && <Row a="Aguardando validação" b={String(pendN)} />}
+                        <Row a="Dias de treino" b={String(dias)} />
+                        <Row a="Média semanal" b={`~${freq}x`} />
+
+                        <Sec>⏰ Aulas por horário</Sec>
+                        {WEEKDAY_SLOTS.map((sl) => (
+                          <Row key={sl} a={sl.replace(":", "h")} b={aulasTxt(porSlot[sl] || 0)} dim={!porSlot[sl]} />
+                        ))}
+                        {WEEKEND_SLOTS.map((sl) => (
+                          <Row key={sl} a={`${sl.replace(":", "h")} · fim de semana`} b={aulasTxt(porSlot[sl] || 0)} dim={!porSlot[sl]} />
+                        ))}
+
+                        <Sec>🧑‍🏫 Aulas por professor</Sec>
+                        {INSTRUCTORS.map((i) => (
+                          <Row key={i} a={i} b={aulasTxt(porProf[i] || 0)} dim={!porProf[i]} />
+                        ))}
+
+                        <Sec>📣 Convidados</Sec>
+                        <Row a="Convidados trazidos" b={String(gs.length)} dim={!gs.length} />
+                        <Row a="🧸 Fecharam pacote 10+" b={String(gBought)} dim={!gBought} />
+                        {gs.map((g) => (
+                          <div key={g.id} className="flex justify-between items-baseline gap-2" style={{ fontSize: 12, lineHeight: 1.8, color: C.cream }}>
+                            <span className="truncate">• {g.name}{g.kind === "spin" ? " 📣" : ""}{g.bought ? " 🧸" : ""}</span>
+                            <span className="shrink-0" style={{ fontFamily: "'DM Mono', monospace", fontSize: 10.5, color: g.status === "ok" ? C.ok : C.amberSoft }}>
+                              {g.status === "ok" ? "✓ validado" : "pendente"}
+                            </span>
+                          </div>
+                        ))}
+
+                        <Sec>📝 Observações (só a administração vê)</Sec>
+                        <textarea
+                          value={obsDraft}
+                          onChange={(e) => setObsDraft(e.target.value)}
+                          placeholder="Comportamento, problemas no cadastro, combinados…"
+                          rows={3}
+                          className="w-full rounded px-2.5 py-2 outline-none"
+                          style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream, fontSize: 12, resize: "vertical", fontFamily: "'Montserrat', sans-serif" }}
+                        />
+                        <button
+                          onClick={() => {
+                            mutateTrack(t.id, (d) => { const s2 = d.students.find((x) => x.id === s.id); if (s2) s2.notes = obsDraft.trim(); });
+                            avisar("📝 Observação salva!");
+                          }}
+                          className="mt-1 rounded px-3 py-1.5 font-bold"
+                          style={{ background: C.amber, color: C.cream, fontSize: 12 }}
+                        >Salvar observação</button>
+                      </div>
+                    );
+                  })()}
+                </div>
+              );
+            })}
+          </div>
+          {footerNote}
+          <div className="flex justify-center pb-8">{helpBtn}</div>
+        </main>
+      </div>
+    );
+  }
+
   // ---------- Escolha do desafio ----------
   if (!track) {
     return (
@@ -1213,6 +1448,15 @@ export default function App() {
                 });
                 return n;
               })()} → abrir central de validação
+            </button>
+          )}
+          {admin && (
+            <button
+              onClick={() => { setShowCad(true); setCadQ(""); setEditC(null); window.scrollTo({ top: 0 }); }}
+              className="w-full rounded-lg px-3 py-2.5 mt-2 text-center font-bold"
+              style={{ background: C.panel, color: C.amberSoft, fontSize: 13, border: `1px solid ${C.line}` }}
+            >
+              👥 CADASTROS · {TRACKS.reduce((n, t) => n + ((allData[t.id] || {}).students || []).length, 0)} → ver e editar todos
             </button>
           )}
           {footerNote}
