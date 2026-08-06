@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
 // ---------- Constantes ----------
 const WEEKDAY_SLOTS = ["06:15", "07:15", "08:15", "11:15", "16:30", "17:30", "18:30", "19:30"];
@@ -410,14 +410,47 @@ function computeAwards(d) {
   return { shakes, pats };
 }
 
+// ---------- Tempo das missões relâmpago ----------
+const dtNowLocal = () => {
+  const d = new Date(); d.setSeconds(0, 0);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+};
+const fmtHM = (ts) => {
+  const d = new Date(ts); const p = (n) => String(n).padStart(2, "0");
+  return `${p(d.getHours())}h${p(d.getMinutes())}`;
+};
+const fmtDT = (ts) => {
+  const d = new Date(ts);
+  const meses = ["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"];
+  return `${d.getDate()}/${meses[d.getMonth()]} ${fmtHM(ts)}`;
+};
+const isoDateOf = (ts) => {
+  const d = new Date(ts); const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+};
+function mmStartTs(x) { return x.startTs || Date.parse((x.start || DESAFIO_INICIO) + "T00:00:00"); }
+function mmEndTs(x) { return x.endTs || Date.parse((x.end || "2000-01-01") + "T23:59:59"); }
+function mmPhase(x, now) {
+  const s = mmStartTs(x), e = mmEndTs(x);
+  if (now < s) return "agendada";
+  const fechouPorPremio = x.openMode !== "tempo" && (x.winners || []).length >= x.qty;
+  if (now <= e && !fechouPorPremio) return "ativa";
+  const fimReal = fechouPorPremio ? Math.max(...(x.winners || []).map((w) => w.ts || 0), 0) || e : Math.min(e, now);
+  const marco = fechouPorPremio ? fimReal : e;
+  if (now <= marco + 10 * 60000) return "resultado";
+  return "encerrada";
+}
+
 // ---------- Apuração das missões relâmpago ----------
 function miniRecs(d, x) {
-  const ini = x.start || DESAFIO_INICIO;
+  const ini = isoDateOf(mmStartTs(x));
+  const fim = isoDateOf(mmEndTs(x));
   const out = [];
   d.students.forEach((s) => {
     if (s.approved === false) return;
     (s.records || []).forEach((r) => {
-      if (r.status === "ok" && r.date >= ini && r.date <= x.end) out.push({ s, r });
+      if (r.status === "ok" && r.date >= ini && r.date <= fim) out.push({ s, r });
     });
   });
   return out;
@@ -461,6 +494,24 @@ async function loadData(track) {
     return { pin: null, students: [] };
   }
 }
+const GLOBAL_KEY = "spincycle-desafio-shared-v1-global";
+const fotosKey = (t) => `spincycle-desafio-shared-v1-fotos-${t}`;
+async function loadGlobal() {
+  try {
+    const r = await window.storage.get(GLOBAL_KEY, true);
+    return r ? JSON.parse(r.value) : { miniMissions: [] };
+  } catch {
+    return { miniMissions: [] };
+  }
+}
+async function saveGlobal(g) {
+  try {
+    const cur = await window.storage.get(GLOBAL_KEY, true);
+    if (cur && cur.value) await window.storage.set(GLOBAL_KEY + "-bak", cur.value, true);
+  } catch { /* backup é melhor esforço */ }
+  await window.storage.set(GLOBAL_KEY, JSON.stringify(g), true);
+}
+
 async function saveData(track, data) {
   try {
     const cur = await window.storage.get(keyFor(track), true);
@@ -644,7 +695,7 @@ export default function App() {
   const [showAllHist, setShowAllHist] = useState(false);
   const [showAllRank, setShowAllRank] = useState(false);
   const [showManual, setShowManual] = useState(false);
-  const [mm, setMm] = useState({ name: "", start: todayStr(), end: todayStr(), desc: "", prize: "", qty: 1, mode: "manual", slots: [], answersText: "", optionsText: "", correct: "", tries: 3, scope: "este" });
+  const [mm, setMm] = useState({ name: "", startDT: dtNowLocal(), durMin: 30, desc: "", prize: "", qty: 1, mode: "manual", slots: [], answersText: "", optionsText: "", correct: "", tries: 3, scope: "todos", openMode: "fila", aulaDate: todayStr(), aulaSlot: "" });
   const [qzAns, setQzAns] = useState({});
   const [qzMsg, setQzMsg] = useState({});
   const [mmMsg, setMmMsg] = useState("");
@@ -672,6 +723,11 @@ export default function App() {
   const [spy, setSpy] = useState(false);
   const [editH, setEditH] = useState(null);
   const [editN, setEditN] = useState(null);
+  const [gData, setGData] = useState({ miniMissions: [] });
+  const [miniPage, setMiniPage] = useState(null);
+  const [photos, setPhotos] = useState({});
+  const [showPerfil, setShowPerfil] = useState(false);
+  const bootView = useRef(false);
   const [obsDraft, setObsDraft] = useState("");
   const [allData, setAllData] = useState({});
   const [showPend, setShowPend] = useState(false);
@@ -709,16 +765,34 @@ export default function App() {
         try { await saveData(track, d); } catch { /* segue com o estado local */ }
       }
       if (alive) setData(d);
+      const g = await loadGlobal();
+      if (alive) setGData(g);
+      try {
+        const rf = await window.storage.get(fotosKey(track), true);
+        if (alive) setPhotos(rf && rf.value ? JSON.parse(rf.value) : {});
+      } catch { if (alive) setPhotos({}); }
     })();
     const t = setInterval(async () => {
       try {
         const fresh = await loadData(track);
         captureWinners(fresh);
         if (alive) setData(fresh);
+        const g = await loadGlobal();
+        if (alive) setGData(g);
       } catch { /* mantém o estado atual */ }
     }, 30000);
     return () => { alive = false; clearInterval(t); };
   }, [track]);
+
+  useEffect(() => {
+    if (!data || view || admin || spy || bootView.current) return;
+    bootView.current = true;
+    const sid = myIds[track];
+    const s = sid ? data.students.find((x) => x.id === sid) : null;
+    if (s && s.pass && unlocks[s.id] === s.pass) {
+      setView(s.id); setDetailMission(null); setShowAllHist(false); setConfirmRemove(false);
+    }
+  }, [data]);
 
   useEffect(() => {
     if (track) return;
@@ -797,6 +871,72 @@ export default function App() {
       }
     });
     setAddOpen("");
+  };
+
+  const mutateGlobal = (fn) => {
+    (async () => {
+      let base = null;
+      try {
+        base = await loadGlobal();
+        if (!base || typeof base !== "object") base = { miniMissions: [] };
+      } catch {
+        avisar("⚠️ Sem conexão com o banco — a ação NÃO foi salva. Tente novamente.");
+        return;
+      }
+      const next = JSON.parse(JSON.stringify(base));
+      try { fn(next); } catch (e) { console.error(e); return; }
+      try {
+        await saveGlobal(next);
+        setGData(next);
+      } catch {
+        avisar("⚠️ Falha ao salvar — a ação NÃO foi gravada. Tente novamente.");
+      }
+    })();
+  };
+  const doMini = (x) => (x && x.scope === "todos" || (x && x.scope === "aula") ? mutateGlobal : mutate);
+  const salvarFoto = async (sid, dataURL) => {
+    let base = {};
+    try {
+      const r = await window.storage.get(fotosKey(track), true);
+      if (r && r.value) base = JSON.parse(r.value);
+    } catch {
+      avisar("⚠️ Sem conexão — a foto NÃO foi salva. Tente novamente.");
+      return;
+    }
+    if (dataURL) base[sid] = dataURL; else delete base[sid];
+    try {
+      await window.storage.set(fotosKey(track), JSON.stringify(base), true);
+      setPhotos(base);
+      avisar(dataURL ? "📸 Foto atualizada!" : "🗑 Foto removida.");
+    } catch {
+      avisar("⚠️ Falha ao salvar a foto. Tente novamente.");
+    }
+  };
+  const onFotoFile = (sid, file) => {
+    if (!file) return;
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const M = 240;
+      const sc = Math.min(1, M / Math.max(img.width, img.height));
+      const w = Math.max(1, Math.round(img.width * sc));
+      const h = Math.max(1, Math.round(img.height * sc));
+      const cv = document.createElement("canvas");
+      cv.width = w; cv.height = h;
+      cv.getContext("2d").drawImage(img, 0, 0, w, h);
+      URL.revokeObjectURL(url);
+      salvarFoto(sid, cv.toDataURL("image/jpeg", 0.72));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); avisar("⚠️ Não consegui ler essa imagem."); };
+    img.src = url;
+  };
+  const alunosDeTodos = () => {
+    const out = [];
+    TRACKS.forEach((t) => {
+      const d2 = allData[t.id];
+      if (d2) d2.students.forEach((s) => out.push(s));
+    });
+    return out;
   };
 
   const mutateTrack = (tid, fn) => {
@@ -921,7 +1061,7 @@ export default function App() {
 
   const fonts = (
     <>
-      <style>{"@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&family=DM+Mono:wght@400;500&display=swap');"}</style>
+      <style>{"@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&family=DM+Mono:wght@400;500&display=swap'); html, body { overscroll-behavior-y: none; } body { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }"}</style>
       {syncMsg && (
         <div style={{ position: "fixed", top: 10, left: "50%", transform: "translateX(-50%)", zIndex: 9999, background: "#B15560", color: "#fff", padding: "10px 16px", borderRadius: 10, fontSize: 13, fontWeight: 700, maxWidth: "92%", textAlign: "center", boxShadow: "0 4px 20px rgba(0,0,0,.5)" }}>
           {syncMsg}
@@ -1303,7 +1443,7 @@ export default function App() {
                     const shakesGanhos = M.filter((m) => AW.shakes[m.id] && AW.shakes[m.id].id === s.id).map((m) => m.name);
                     const PAT_LABELS = { horiz: "Horizontal", vert: "Vertical", diag: "Diagonal", corners: "4 Cantos", conv: "4 Conversões", full: "Cartela Cheia", bpm: "Giro de 175 BPM" };
                     const patsGanhos = Object.keys(PAT_LABELS).filter((k) => AW.pats[k] && AW.pats[k].id === s.id).map((k) => PAT_LABELS[k]);
-                    const miniGanhas = (dTrack && dTrack.miniMissions || []).filter((x) => (x.winners || []).some((w) => w.id === s.id)).map((x) => x.name);
+                    const miniGanhas = [...((dTrack && dTrack.miniMissions) || []), ...(gData.miniMissions || [])].filter((x) => (x.winners || []).some((w) => w.id === s.id)).map((x) => x.name);
                     const totalAlvo = M.reduce((n, m) => n + m.target, 0);
                     const totalFeito = M.reduce((n, m) => n + Math.min(r.p[m.id], m.target), 0);
                     const pctCaminho = Math.round((totalFeito / totalAlvo) * 100);
@@ -1838,7 +1978,11 @@ export default function App() {
       setGErr("Digite o nome completo do amigo (nome e sobrenome).");
       return;
     }
-    if (!gform.slot) { setGErr("Selecione o horário da aula experimental."); return; }
+    if (!gform.slot) { setGErr("Selecione o horário da aula experimental do seu convidado."); return; }
+    if (gform.kind === "spin") {
+      const usados = (student.guests || []).filter((g) => g.kind === "spin").length;
+      if (usados >= 2) { setGErr("⚠️ Você já usou seus 2 convites de ALUNO CONVIDADO AO DESAFIO (📣)."); return; }
+    }
     const eData = validaData(gform.date);
     if (eData) { setGErr(eData); return; }
     const jaConvidado = data.students.some((s) => (s.guests || []).some((g) => norm(g.name) === norm(name)));
@@ -1865,6 +2009,138 @@ export default function App() {
     setGSaved(true);
     setTimeout(() => setGSaved(false), 3000);
   };
+
+  // ---------- Resultados das Missões Relâmpago ----------
+  if (miniPage && track && data) {
+    const misturadas = [...(gData.miniMissions || []), ...(data.miniMissions || [])].sort((a, b) => (a.id < b.id ? 1 : -1));
+    const voltarBtn = (fn, rotulo) => (
+      <button onClick={fn} style={{ color: C.oak, fontSize: 13 }}>{rotulo}</button>
+    );
+    if (miniPage === "list") {
+      return (
+        <div className="min-h-screen" style={{ ...pageVars, background: pageBg, fontFamily: "'Montserrat', sans-serif", transition: "background .4s" }}>
+          {fonts}{modal}
+          <main className="max-w-md mx-auto px-5 pb-16 pt-6">
+            <div className="flex items-center justify-between">
+              {voltarBtn(() => setMiniPage(null), "← Voltar")}
+              {helpBtn}
+            </div>
+            <h2 className="mt-4 mb-1" style={{ fontWeight: 800, fontSize: 22, color: C.amber, textTransform: "uppercase", letterSpacing: "0.03em" }}>
+              ⚡ Missões Relâmpago
+            </h2>
+            <div style={{ color: C.mut, fontSize: 12, marginBottom: 12 }}>
+              Toque em uma missão para ver o resultado completo.
+            </div>
+            <div className="flex flex-col gap-2">
+              {misturadas.map((x) => {
+                const fase = mmPhase(x, Date.now());
+                const ws = x.winners || [];
+                return (
+                  <button
+                    key={x.id}
+                    onClick={() => { setMiniPage(x.id); window.scrollTo({ top: 0 }); }}
+                    className="rounded-xl px-4 py-3 text-left"
+                    style={{ background: C.panel, border: `1px solid ${fase === "ativa" ? C.amber : C.line}` }}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div style={{ color: C.cream, fontWeight: 800, fontSize: 13, textTransform: "uppercase" }}>
+                        ⚡ {x.scope === "todos" ? "🌍 " : x.scope === "grupos" ? "🥇 " : x.scope === "aula" ? "🚴 " : ""}{x.name}
+                      </div>
+                      <div className="shrink-0" style={{ color: fase === "ativa" ? C.amberSoft : C.mut, fontSize: 11, fontWeight: 700 }}>
+                        {fase === "agendada" ? "⏳ agendada" : fase === "ativa" ? "⏱️ rolando" : "🏁 resultado"}
+                      </div>
+                    </div>
+                    <div style={{ color: C.mut, fontSize: 11.5, marginTop: 3, fontFamily: "'DM Mono', monospace" }}>
+                      {fmtDT(mmStartTs(x))} → {fmtDT(mmEndTs(x))} · 🏆 {x.prize} ({ws.length}/{x.qty})
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+            {footerNote}
+            <div className="flex justify-center pb-8">{helpBtn}</div>
+          </main>
+        </div>
+      );
+    }
+    const x = misturadas.find((y) => y.id === miniPage);
+    if (!x) { setMiniPage("list"); return null; }
+    const fase = mmPhase(x, Date.now());
+    const ws = (x.winners || []).slice().sort((a, b) => (a.ts || 0) - (b.ts || 0));
+    const idsW = new Set(ws.map((w) => w.id));
+    const logOrd = (x.log || []).slice().sort((a, b) => (a.ts || 0) - (b.ts || 0));
+    const mostraGabarito = fase === "resultado" || fase === "encerrada";
+    return (
+      <div className="min-h-screen" style={{ ...pageVars, background: pageBg, fontFamily: "'Montserrat', sans-serif", transition: "background .4s" }}>
+        {fonts}{modal}
+        <main className="max-w-md mx-auto px-5 pb-16 pt-6">
+          <div className="flex items-center justify-between">
+            <button onClick={() => setMiniPage("list")} style={{ color: C.oak, fontSize: 13 }}>← Todas as relâmpago</button>
+            <button onClick={() => setMiniPage(null)} style={{ color: C.oak, fontSize: 13 }}>✕ fechar</button>
+          </div>
+          <h2 className="mt-4 mb-1" style={{ fontWeight: 800, fontSize: 20, color: C.amber, textTransform: "uppercase", letterSpacing: "0.03em", lineHeight: 1.3 }}>
+            ⚡ {x.scope === "todos" ? "🌍 " : x.scope === "grupos" ? "🥇 " : x.scope === "aula" ? "🚴 " : ""}{x.name}
+          </h2>
+          <div style={{ color: C.mut, fontSize: 12, marginBottom: 4, fontFamily: "'DM Mono', monospace" }}>
+            {fmtDT(mmStartTs(x))} → {fmtDT(mmEndTs(x))} · 🏆 {x.prize}
+          </div>
+          <div style={{ color: C.cream, fontSize: 13, lineHeight: 1.55, marginBottom: 12 }}>{x.desc}</div>
+          {(x.mode === "quizText" || x.mode === "quizChoice") && mostraGabarito && (
+            <div className="rounded-lg px-3 py-2 mb-3" style={{ background: C.panelSoft, border: `1px solid ${C.ok}66`, color: C.ok, fontSize: 12.5, fontWeight: 700 }}>
+              ✓ Resposta correta: {x.mode === "quizChoice" ? x.correct : (x.answers || [])[0]}
+            </div>
+          )}
+          {fase === "ativa" && (
+            <div className="rounded-lg px-3 py-2 mb-3" style={{ background: C.wineDeep, color: C.amberSoft, fontSize: 12.5, fontWeight: 700 }}>
+              ⏱️ Missão ainda rolando — resultado completo às {fmtHM(mmEndTs(x))}!
+            </div>
+          )}
+
+          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, letterSpacing: "0.25em", color: C.oak, textTransform: "uppercase", margin: "14px 0 6px" }}>
+            🏆 Vencedores
+          </div>
+          {ws.length === 0 && <div style={{ color: C.mut, fontSize: 12.5 }}>Ainda sem vencedores{fase === "ativa" ? "…" : "."}</div>}
+          <div className="flex flex-col gap-1">
+            {ws.map((w, i) => (
+              <div key={w.id + i} className="rounded-lg px-3 py-2 flex items-center gap-2" style={{ background: C.panel, border: `1px solid ${C.oak}66` }}>
+                <span className="shrink-0" style={{ fontWeight: 800, color: C.oak, fontSize: 13 }}>{i + 1}º</span>
+                <span className="flex-1 min-w-0 truncate" style={{ color: C.amber, fontWeight: 700, fontSize: 13 }}>{w.name}</span>
+                <span className="shrink-0" style={{ fontFamily: "'DM Mono', monospace", fontSize: 10.5, color: C.mut }}>{w.ts ? fmtTs(w.ts) : ""}</span>
+              </div>
+            ))}
+          </div>
+
+          {(x.mode === "quizText" || x.mode === "quizChoice") && (
+            <>
+              <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, letterSpacing: "0.25em", color: C.oak, textTransform: "uppercase", margin: "16px 0 6px" }}>
+                Todas as respostas · {logOrd.length}
+              </div>
+              {!mostraGabarito && logOrd.length > 0 && (
+                <div style={{ color: C.mut, fontSize: 12 }}>As respostas de todo mundo aparecem aqui quando a missão encerrar. 🤫</div>
+              )}
+              {mostraGabarito && logOrd.length === 0 && (
+                <div style={{ color: C.mut, fontSize: 12 }}>Nenhuma resposta registrada (ou missão criada antes desse recurso).</div>
+              )}
+              {mostraGabarito && (
+                <div className="flex flex-col gap-1">
+                  {logOrd.map((l, i) => (
+                    <div key={i} className="rounded-lg px-3 py-1.5 flex items-center gap-2" style={{ background: C.panelSoft, border: `1px solid ${C.line}` }}>
+                      <span className="shrink-0" style={{ fontFamily: "'DM Mono', monospace", fontSize: 10.5, color: C.mut }}>{fmtHM(l.ts)}</span>
+                      <span className="min-w-0 truncate" style={{ color: idsW.has(l.sid) && l.ok ? C.amber : C.cream, fontWeight: 700, fontSize: 12.5 }}>{l.name}</span>
+                      <span className="flex-1 min-w-0 truncate" style={{ color: C.mut, fontSize: 12, fontStyle: "italic" }}>“{l.ans}”</span>
+                      <span className="shrink-0" style={{ fontSize: 12 }}>{l.ok ? "✅" : "❌"}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+          {footerNote}
+          <div className="flex justify-center pb-8">{helpBtn}</div>
+        </main>
+      </div>
+    );
+  }
 
   // ---------- Entrar nas Missões (menu de acesso) ----------
   if (showEntry && !admin) {
@@ -2205,16 +2481,30 @@ export default function App() {
                     { bg: "linear-gradient(135deg, #D7DBE0, #9FA6AD)", bd: "#E8ECF0", glow: "#C0C4C955" },
                     { bg: "linear-gradient(135deg, #C98F5A, #8E5F33)", bd: "#DFA877", glow: "#B07A4A55" },
                   ][i] : null;
+                  const foto = photos[s.id];
                   return (
-                    <div className="flex items-center justify-center rounded-full shrink-0" style={{
-                      width: 34, height: 34,
-                      background: medal ? medal.bg : C.panelSoft,
-                      color: medal ? "#141414" : C.mut,
-                      border: medal ? `2px solid ${medal.bd}` : `1px solid ${C.line}`,
-                      boxShadow: medal ? `0 0 10px ${medal.glow}` : "none",
-                      fontFamily: "'DM Mono', monospace", fontSize: 13, fontWeight: 500,
-                    }}>
-                      {i + 1}
+                    <div className="relative shrink-0" style={{ width: 38, height: 38 }}>
+                      <div className="flex items-center justify-center rounded-full overflow-hidden" style={{
+                        width: 38, height: 38,
+                        background: medal ? medal.bg : C.panelSoft,
+                        color: medal ? "#141414" : C.mut,
+                        border: medal ? `2px solid ${medal.bd}` : `1px solid ${C.line}`,
+                        boxShadow: medal ? `0 0 10px ${medal.glow}` : "none",
+                        fontFamily: "'DM Mono', monospace", fontSize: 13, fontWeight: 500,
+                      }}>
+                        {foto ? <img src={foto} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : (i + 1)}
+                      </div>
+                      {foto && (
+                        <div className="absolute flex items-center justify-center rounded-full" style={{
+                          bottom: -3, right: -3, width: 17, height: 17,
+                          background: medal ? medal.bg : "#2A2A2C",
+                          color: medal ? "#141414" : C.mut,
+                          border: medal ? `1.5px solid ${medal.bd}` : `1px solid ${C.line}`,
+                          fontFamily: "'DM Mono', monospace", fontSize: 9.5, fontWeight: 700,
+                        }}>
+                          {i + 1}
+                        </div>
+                      )}
                     </div>
                   );
                 })()}
@@ -2304,16 +2594,19 @@ export default function App() {
                 <input value={mm.name} onChange={(e) => setMm({ ...mm, name: e.target.value })} placeholder="Nome da missão (ex.: Story na Bike)"
                   className="rounded-lg px-3 py-2 outline-none" style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream }} />
                 <div className="flex items-center gap-2">
-                  <span className="shrink-0" style={{ color: C.mut, fontSize: 12, width: 96 }}>Data de início</span>
-                  <input type="date" value={mm.start} min={todayStr()} max="2026-09-20"
-                    onChange={(e) => setMm({ ...mm, start: e.target.value, end: mm.end < e.target.value ? e.target.value : mm.end })}
+                  <span className="shrink-0" style={{ color: C.mut, fontSize: 12, width: 96 }}>Começa em</span>
+                  <input type="datetime-local" value={mm.startDT}
+                    onChange={(e) => setMm({ ...mm, startDT: e.target.value })}
                     className="flex-1 rounded-lg px-3 py-2 outline-none" style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream, colorScheme: "dark" }} />
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="shrink-0" style={{ color: C.mut, fontSize: 12, width: 96 }}>Data de fim</span>
-                  <input type="date" value={mm.end} min={mm.start} max="2026-09-20"
-                    onChange={(e) => setMm({ ...mm, end: e.target.value })}
-                    className="flex-1 rounded-lg px-3 py-2 outline-none" style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream, colorScheme: "dark" }} />
+                  <span className="shrink-0" style={{ color: C.mut, fontSize: 12, width: 96 }}>Dura (minutos)</span>
+                  <input type="number" min="1" max="20160" value={mm.durMin}
+                    onChange={(e) => setMm({ ...mm, durMin: Math.max(1, parseInt(e.target.value || "1", 10)) })}
+                    className="flex-1 rounded-lg px-3 py-2 outline-none" style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream }} />
+                  <span className="shrink-0" style={{ color: C.mut, fontSize: 11 }}>
+                    {mm.durMin >= 1440 ? `${Math.round(mm.durMin / 1440)} dia(s)` : mm.durMin >= 60 ? `${Math.floor(mm.durMin / 60)}h${mm.durMin % 60 ? String(mm.durMin % 60).padStart(2, "0") : ""}` : ""}
+                  </span>
                 </div>
                 <input value={mm.desc} onChange={(e) => setMm({ ...mm, desc: e.target.value })} placeholder="Explicação breve (o que o aluno precisa fazer)"
                   className="rounded-lg px-3 py-2 outline-none" style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream }} />
@@ -2328,8 +2621,33 @@ export default function App() {
                 </select>
                 <select value={mm.scope} onChange={(e) => setMm({ ...mm, scope: e.target.value })}
                   className="rounded-lg px-3 py-2 outline-none" style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream }}>
+                  <option value="todos">🌍 Todos os participantes — um pódio só</option>
+                  <option value="grupos">🥇 1 prêmio para cada grupo (Ilimitados, Pacotes e Híbridos)</option>
+                  <option value="aula">🚴 Só quem fez check-in em uma aula que eu escolher</option>
                   <option value="este">🎯 Só para este desafio ({(TRACKS.find((t) => t.id === track) || {}).short})</option>
-                  <option value="todos">🌍 Para os 3 desafios (prêmios contam por grupo)</option>
+                </select>
+                {mm.scope === "aula" && (
+                  <div className="flex gap-2">
+                    <input type="date" value={mm.aulaDate} min={DESAFIO_INICIO} max="2026-09-20"
+                      onChange={(e) => {
+                        const nd = e.target.value;
+                        const vs = nd && isWeekendDate(nd) ? WEEKEND_SLOTS : WEEKDAY_SLOTS;
+                        setMm({ ...mm, aulaDate: nd, aulaSlot: vs.includes(mm.aulaSlot) ? mm.aulaSlot : "" });
+                      }}
+                      className="flex-1 rounded-lg px-3 py-2 outline-none" style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream, colorScheme: "dark" }} />
+                    <select value={mm.aulaSlot} onChange={(e) => setMm({ ...mm, aulaSlot: e.target.value })}
+                      className="rounded-lg px-3 py-2 outline-none" style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: mm.aulaSlot ? C.cream : C.mut }}>
+                      <option value="" disabled>— aula —</option>
+                      {(mm.aulaDate && isWeekendDate(mm.aulaDate) ? WEEKEND_SLOTS : WEEKDAY_SLOTS).map((sl) => (
+                        <option key={sl} value={sl}>{sl.replace(":", "h")}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                <select value={mm.openMode} onChange={(e) => setMm({ ...mm, openMode: e.target.value })}
+                  className="rounded-lg px-3 py-2 outline-none" style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream }}>
+                  <option value="fila">🏁 Fecha assim que os prêmios acabarem</option>
+                  <option value="tempo">⏱️ Aberta até o fim do tempo — todos respondem, resultado sai no final</option>
                 </select>
                 {mm.mode === "slot" && (
                   <div className="flex flex-wrap gap-1.5">
@@ -2384,7 +2702,10 @@ export default function App() {
                   onClick={() => {
                     if (!mm.name.trim() || !mm.desc.trim() || !mm.prize.trim()) { setMmMsg("Preencha nome, explicação e prêmio."); return; }
                     if (mm.mode === "slot" && !mm.slots.length) { setMmMsg("Escolha ao menos 1 horário para essa missão."); return; }
-                    if (mm.end < mm.start) { setMmMsg("A data de fim não pode ser antes da data de início."); return; }
+                    const startTs = Date.parse(mm.startDT);
+                    if (!startTs) { setMmMsg("Escolha a data e a hora de início."); return; }
+                    if (mm.scope === "aula" && !mm.aulaSlot) { setMmMsg("Escolha a aula (dia e horário) que dá acesso à missão."); return; }
+                    const endTs = startTs + mm.durMin * 60000;
                     const answers = mm.answersText.split(",").map((a) => a.trim()).filter(Boolean);
                     const options = mm.optionsText.split(",").map((o) => o.trim()).filter(Boolean);
                     if (mm.mode === "quizText" && !answers.length) { setMmMsg("Informe ao menos 1 resposta aceita."); return; }
@@ -2392,12 +2713,15 @@ export default function App() {
                     const nova = {
                       id: Date.now().toString(36),
                       name: mm.name.trim(), desc: mm.desc.trim(), prize: mm.prize.trim(),
-                      qty: mm.qty, start: mm.start, end: mm.end,
-                      mode: mm.mode, slots: mm.slots, winners: [],
+                      qty: mm.qty, startTs, endTs, start: isoDateOf(startTs), end: isoDateOf(endTs),
+                      mode: mm.mode, slots: mm.slots, winners: [], log: [],
+                      openMode: mm.openMode, aulaDate: mm.aulaDate, aulaSlot: mm.aulaSlot,
                       answers, options, correct: mm.correct, tries: mm.tries, attempts: {},
                     };
-                    if (mm.scope === "todos") {
-                      nova.scope = "todos";
+                    nova.scope = mm.scope;
+                    if (mm.scope === "todos" || mm.scope === "aula") {
+                      mutateGlobal((d) => { if (!d.miniMissions) d.miniMissions = []; d.miniMissions.push(nova); });
+                    } else if (mm.scope === "grupos") {
                       TRACKS.forEach((t) => mutateTrack(t.id, (d) => {
                         if (!d.miniMissions) d.miniMissions = [];
                         d.miniMissions.push(JSON.parse(JSON.stringify(nova)));
@@ -2405,8 +2729,13 @@ export default function App() {
                     } else {
                       mutate((d) => { if (!d.miniMissions) d.miniMissions = []; d.miniMissions.push(nova); });
                     }
-                    setMm({ name: "", start: todayStr(), end: todayStr(), desc: "", prize: "", qty: 1, mode: "manual", slots: [], answersText: "", optionsText: "", correct: "", tries: 3, scope: "este" });
-                    setMmMsg(mm.scope === "todos" ? "⚡🌍 Missão criada nos 3 desafios!" : "⚡ Missão criada! Já está visível na cartela dos alunos.");
+                    setMm({ name: "", startDT: dtNowLocal(), durMin: 30, desc: "", prize: "", qty: 1, mode: "manual", slots: [], answersText: "", optionsText: "", correct: "", tries: 3, scope: "todos", openMode: "fila", aulaDate: todayStr(), aulaSlot: "" });
+                    setMmMsg(
+                      mm.scope === "todos" ? "⚡🌍 Missão criada para TODOS — um pódio só!"
+                      : mm.scope === "grupos" ? "⚡🥇 Missão criada nos 3 grupos — 1 pódio por grupo!"
+                      : mm.scope === "aula" ? `⚡🚴 Missão criada só para a aula de ${fmtBR(mm.aulaDate)} às ${mm.aulaSlot.replace(":", "h")}!`
+                      : "⚡ Missão criada! Já está visível na cartela dos alunos."
+                    );
                     setTimeout(() => setMmMsg(""), 3500);
                   }}
                   className="rounded-lg py-2.5 font-bold" style={{ background: `linear-gradient(120deg, ${C.amber}, #16696F)`, color: C.cream }}>
@@ -2415,23 +2744,34 @@ export default function App() {
                 {mmMsg && <div className="text-center" style={{ color: C.amberSoft, fontSize: 12 }}>{mmMsg}</div>}
               </div>
 
-              {(data.miniMissions || []).slice().reverse().map((x) => {
-                const ativa = x.end >= todayStr() && (x.winners || []).length < x.qty;
-                const candidatos = data.students.filter((s) => s.approved !== false && !(x.winners || []).some((w) => w.id === s.id))
+              {[...(gData.miniMissions || []), ...(data.miniMissions || [])]
+                .sort((a, b) => (a.id < b.id ? 1 : -1))
+                .map((x) => {
+                const fase = mmPhase(x, Date.now());
+                const ativa = fase === "ativa";
+                const naAula = (s) => (s.records || []).some((r) => r.status === "ok" && r.date === x.aulaDate && r.slot === x.aulaSlot);
+                const baseTodos = x.scope === "todos" || x.scope === "aula";
+                let base = baseTodos ? alunosDeTodos() : data.students;
+                if (x.scope === "aula") base = base.filter(naAula);
+                const dx = baseTodos ? { students: x.scope === "aula" ? base : alunosDeTodos() } : data;
+                const candidatos = base.filter((s) => s.approved !== false && !(x.winners || []).some((w) => w.id === s.id))
                   .sort((a, b) => a.name.localeCompare(b.name));
                 return (
                   <div key={x.id} className="rounded-lg p-3 mt-3" style={{ background: C.panelSoft, border: `1px solid ${ativa ? C.amber + "88" : C.line}` }}>
                     <div className="flex items-center justify-between gap-2">
-                      <div style={{ color: C.cream, fontWeight: 800, fontSize: 13 }}>⚡ {x.scope === "todos" ? "🌍 " : ""}{x.name}</div>
-                      <div style={{ color: ativa ? C.amberSoft : C.mut, fontSize: 11 }}>
-                        {ativa
-                          ? (x.start && x.start > todayStr() ? `⏳ começa ${fmtBR(x.start)}`
-                            : x.end === todayStr() ? "só hoje!"
-                            : `até ${fmtBR(x.end)}`)
+                      <div style={{ color: C.cream, fontWeight: 800, fontSize: 13 }}>⚡ {x.scope === "todos" ? "🌍 " : x.scope === "grupos" ? "🥇 " : x.scope === "aula" ? "🚴 " : ""}{x.name}</div>
+                      <div style={{ color: fase === "ativa" ? C.amberSoft : fase === "agendada" ? C.oak : C.mut, fontSize: 11 }}>
+                        {fase === "agendada" ? `⏳ começa ${fmtDT(mmStartTs(x))}`
+                          : fase === "ativa" ? `⏱️ até ${fmtDT(mmEndTs(x))}`
+                          : fase === "resultado" ? "🏁 resultado no ar"
                           : "encerrada"}
                       </div>
                     </div>
-                    <div style={{ color: C.mut, fontSize: 12, marginTop: 2 }}>{x.desc} · 🏆 {x.prize} ({(x.winners || []).length}/{x.qty})</div>
+                    <div style={{ color: C.mut, fontSize: 12, marginTop: 2 }}>
+                      {x.desc} · 🏆 {x.prize} ({(x.winners || []).length}/{x.qty})
+                      {x.scope === "aula" && x.aulaDate ? ` · 🚴 aula de ${fmtBR(x.aulaDate)} ${String(x.aulaSlot || "").replace(":", "h")}` : ""}
+                      {x.openMode === "tempo" ? " · ⏱️ aberta até o fim do tempo" : ""}
+                    </div>
                     {x.mode === "quizText" && (
                       <div style={{ color: C.oak, fontSize: 11, marginTop: 2 }}>
                         ✍️ aceita: {(x.answers || []).join(" | ")} · {x.tries || 3} tentativa{(x.tries || 3) === 1 ? "" : "s"} · {Object.keys(x.attempts || {}).length} responderam
@@ -2449,20 +2789,21 @@ export default function App() {
                     )}
                     {ativa && (x.mode === "top" || x.mode === "slot" || x.mode === "sorteio") && (() => {
                       const faltam = x.qty - (x.winners || []).length;
-                      const parcial = x.mode === "top" ? miniTop(data, x).slice(0, x.qty)
-                        : x.mode === "slot" ? miniSlotFirsts(data, x).slice(0, x.qty)
-                        : miniElegiveis(data, x);
+                      const parcial = x.mode === "top" ? miniTop(dx, x).slice(0, x.qty)
+                        : x.mode === "slot" ? miniSlotFirsts(dx, x).slice(0, x.qty)
+                        : miniElegiveis(dx, x);
                       const apurar = () => {
-                        mutate((d) => {
+                        doMini(x)((d) => {
                           const xx = (d.miniMissions || []).find((y) => y.id === x.id);
                           if (!xx) return;
                           if (!xx.winners) xx.winners = [];
                           const ja = new Set(xx.winners.map((w) => w.id));
+                          const fonte = xx.scope === "todos" ? dx : d;
                           let lista = [];
-                          if (xx.mode === "top") lista = miniTop(d, xx);
-                          else if (xx.mode === "slot") lista = miniSlotFirsts(d, xx);
+                          if (xx.mode === "top") lista = miniTop(fonte, xx);
+                          else if (xx.mode === "slot") lista = miniSlotFirsts(fonte, xx);
                           else {
-                            const el = miniElegiveis(d, xx).filter((s) => !ja.has(s.id));
+                            const el = miniElegiveis(fonte, xx).filter((s) => !ja.has(s.id));
                             for (let i = el.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [el[i], el[j]] = [el[j], el[i]]; }
                             lista = el;
                           }
@@ -2499,13 +2840,14 @@ export default function App() {
                           onClick={() => {
                             const sid = miniAward[x.id];
                             if (!sid) return;
-                            mutate((d) => {
+                            const cand = candidatos.find((y) => y.id === sid);
+                            if (!cand) return;
+                            doMini(x)((d) => {
                               const xx = (d.miniMissions || []).find((y) => y.id === x.id);
-                              const s = d.students.find((y) => y.id === sid);
-                              if (!xx || !s) return;
+                              if (!xx) return;
                               if (!xx.winners) xx.winners = [];
                               if (xx.winners.length >= xx.qty || xx.winners.some((w) => w.id === sid)) return;
-                              xx.winners.push({ id: s.id, name: s.name, ts: Date.now() });
+                              xx.winners.push({ id: cand.id, name: cand.name, ts: Date.now() });
                             });
                             setMiniAward({ ...miniAward, [x.id]: "" });
                           }}
@@ -2516,7 +2858,7 @@ export default function App() {
                     )}
                     {ativa && (
                       <button
-                        onClick={() => mutate((d) => { const xx = (d.miniMissions || []).find((y) => y.id === x.id); if (xx) xx.end = "2000-01-01"; })}
+                        onClick={() => doMini(x)((d) => { const xx = (d.miniMissions || []).find((y) => y.id === x.id); if (xx) xx.end = "2000-01-01"; })}
                         className="mt-2 rounded-lg px-2 py-1" title="Encerrar missão" style={{ border: `1px solid ${C.line}`, color: C.mut, fontSize: 11 }}>
                         ✕ Encerrar missão sem premiar o restante
                       </button>
@@ -2659,7 +3001,7 @@ export default function App() {
           })()}
 
           {(() => {
-            const todas = (data.miniMissions || []).slice().reverse();
+            const todas = [...(gData.miniMissions || []), ...(data.miniMissions || [])].sort((a, b) => (a.id < b.id ? 1 : -1));
             return (
               <section className="rounded-xl p-4 mt-3" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
                 <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, letterSpacing: "0.25em", color: C.oak, textTransform: "uppercase", marginBottom: 10 }}>
@@ -2674,8 +3016,9 @@ export default function App() {
                       <div className="flex flex-col gap-2">
                         {visiveis.map((x) => {
                           const ws = (x.winners || []);
-                          const emAberto = (x.start || "") <= todayStr() && x.end >= todayStr() && ws.length < x.qty;
-                          const agendada = (x.start || "") > todayStr();
+                          const faseP = mmPhase(x, Date.now());
+                          const emAberto = faseP === "ativa";
+                          const agendada = faseP === "agendada";
                           return (
                             <div key={x.id} className="flex items-center gap-2">
                               <div className="shrink-0" style={{ width: 100, fontSize: 11, fontWeight: 700, color: ws.length ? C.cream : C.mut, textTransform: "uppercase", lineHeight: 1.2 }}>
@@ -2685,7 +3028,7 @@ export default function App() {
                                 <div style={{ fontSize: 12, color: ws.length ? C.amber : C.mut, fontWeight: ws.length ? 700 : 400, lineHeight: 1.4 }}>
                                   {ws.length
                                     ? ws.map((w, i) => `${i + 1}º ${w.name}`).join(" · ")
-                                    : agendada ? `começa ${fmtBR(x.start)}` : emAberto ? "em aberto" : "encerrada sem ganhador"}
+                                    : agendada ? `começa ${fmtDT(mmStartTs(x))}` : emAberto ? "em aberto" : "encerrada sem ganhador"}
                                 </div>
                                 <div style={{ fontSize: 10, color: C.mut }}>{x.prize} ({ws.length}/{x.qty})</div>
                               </div>
@@ -2710,6 +3053,20 @@ export default function App() {
                     </>
                   );
                 })()}
+
+          {(() => {
+            const total = (gData.miniMissions || []).length + (data.miniMissions || []).length;
+            if (!total) return null;
+            return (
+              <button
+                onClick={() => { setMiniPage("list"); window.scrollTo({ top: 0 }); }}
+                className="w-full rounded-lg py-2.5 mt-2 font-bold"
+                style={{ background: C.panel, border: `1px solid ${C.oak}`, color: C.oak, fontSize: 13 }}
+              >
+                🏁 VER RESULTADOS DE TODAS AS RELÂMPAGO
+              </button>
+            );
+          })()}
               </section>
             );
           })()}
@@ -2871,6 +3228,28 @@ export default function App() {
       <main className="max-w-md mx-auto px-5 pb-16 pt-6">
         <div className="flex items-center justify-between">
           <button onClick={() => { setView(null); setSpy(false); }} style={{ color: C.oak, fontSize: 13 }}>← Ranking</button>
+          <button
+            onClick={async () => {
+              try {
+                const fresh = await loadData(track);
+                captureWinners(fresh);
+                setData(fresh);
+                const g = await loadGlobal();
+                setGData(g);
+                try {
+                  const rf = await window.storage.get(fotosKey(track), true);
+                  setPhotos(rf && rf.value ? JSON.parse(rf.value) : {});
+                } catch { /* fotos ficam como estão */ }
+                avisar("✓ Página atualizada!");
+              } catch {
+                avisar("⚠️ Sem conexão — tente novamente.");
+              }
+            }}
+            className="rounded-full px-3 py-1"
+            style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: C.amberSoft, border: `1px solid ${C.line}`, background: C.panel }}
+          >
+            🔄 atualizar
+          </button>
           {lockBtn}
         </div>
 
@@ -2921,19 +3300,79 @@ export default function App() {
               <button onClick={() => setEditN(null)} className="rounded px-2 py-1" style={{ color: C.mut, fontSize: 12, border: `1px solid ${C.line}` }}>✕</button>
             </div>
           ) : (
-            <h2 style={{ fontFamily: "'Montserrat', sans-serif", fontWeight: 800, fontSize: 26, color: C.amberSoft, textTransform: "uppercase", letterSpacing: "0.03em" }}>
-              {student.name}
-              {admin && (
-                <button onClick={() => setEditN({ name: student.name })} title="Corrigir nome do aluno"
-                  style={{ background: "transparent", border: "none", fontSize: 14, cursor: "pointer", marginLeft: 6, opacity: 0.8 }}>✏️</button>
+            <div className="flex items-center gap-2.5 min-w-0">
+              {photos[student.id] && (
+                <img src={photos[student.id]} alt=""
+                  className="rounded-full shrink-0"
+                  style={{ width: 46, height: 46, objectFit: "cover", border: `2px solid ${C.amber}66` }} />
               )}
-            </h2>
+              <h2 style={{ fontFamily: "'Montserrat', sans-serif", fontWeight: 800, fontSize: 24, color: C.amberSoft, textTransform: "uppercase", letterSpacing: "0.03em", lineHeight: 1.15 }}>
+                {student.name}
+                {admin && (
+                  <button onClick={() => setEditN({ name: student.name })} title="Corrigir nome do aluno"
+                    style={{ background: "transparent", border: "none", fontSize: 14, cursor: "pointer", marginLeft: 6, opacity: 0.8 }}>✏️</button>
+                )}
+              </h2>
+            </div>
           )}
           <div className="shrink-0" style={{ fontFamily: "'DM Mono', monospace", fontSize: 12, color: res.full ? C.amber : C.mut }}>
             {res.doneCount}/9
           </div>
         </div>
 
+        {!admin && student.pass && unlocks[student.id] === student.pass && (
+          <div className="flex gap-2 mb-3 mt-1">
+            <button
+              onClick={() => setShowPerfil(!showPerfil)}
+              className="flex-1 rounded-full py-2 font-bold text-center"
+              style={{ fontSize: 12, background: showPerfil ? C.amber : C.panel, color: showPerfil ? C.cream : C.amberSoft, border: `1px solid ${showPerfil ? C.amber : C.line}` }}
+            >👤 Meu perfil</button>
+            <button
+              onClick={() => { setView(null); setSpy(false); window.scrollTo({ top: 0 }); }}
+              className="flex-1 rounded-full py-2 font-bold text-center"
+              style={{ fontSize: 12, background: C.panel, color: C.amberSoft, border: `1px solid ${C.line}` }}
+            >🏆 Ranking</button>
+            <button
+              onClick={() => { const el = document.getElementById("sec-registrar"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }}
+              className="flex-1 rounded-full py-2 font-bold text-center"
+              style={{ fontSize: 12, background: C.panel, color: C.amberSoft, border: `1px solid ${C.line}` }}
+            >🚴 Registrar ↓</button>
+          </div>
+        )}
+        {!admin && showPerfil && student.pass && unlocks[student.id] === student.pass && (
+          <div className="rounded-xl p-4 mb-3" style={{ background: C.panel, border: `1.5px solid ${C.amber}`, boxShadow: `0 0 14px ${C.amber}33` }}>
+            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, letterSpacing: "0.25em", color: C.oak, textTransform: "uppercase", marginBottom: 10 }}>
+              👤 Meu perfil
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="rounded-full shrink-0 flex items-center justify-center overflow-hidden"
+                style={{ width: 74, height: 74, background: C.panelSoft, border: `2px solid ${C.amber}88` }}>
+                {photos[student.id]
+                  ? <img src={photos[student.id]} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  : <span style={{ fontSize: 28 }}>🚴</span>}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div style={{ color: C.cream, fontWeight: 800, fontSize: 14 }}>{student.name}</div>
+                {student.phone && <div style={{ color: C.mut, fontSize: 11.5, fontFamily: "'DM Mono', monospace" }}>📱 {fmtPhone(student.phone)}</div>}
+                <div className="flex gap-2 mt-2">
+                  <label className="rounded-lg px-3 py-1.5 font-bold" style={{ background: C.amber, color: C.cream, fontSize: 12, cursor: "pointer" }}>
+                    📷 {photos[student.id] ? "Trocar foto" : "Escolher foto"}
+                    <input type="file" accept="image/*" style={{ display: "none" }}
+                      onChange={(e) => { onFotoFile(student.id, e.target.files && e.target.files[0]); e.target.value = ""; }} />
+                  </label>
+                  {photos[student.id] && (
+                    <button onClick={() => salvarFoto(student.id, null)} className="rounded-lg px-3 py-1.5" style={{ color: C.mut, fontSize: 12, border: `1px solid ${C.line}` }}>
+                      🗑 Remover
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div style={{ color: C.mut, fontSize: 11, marginTop: 8, lineHeight: 1.5 }}>
+              Sua foto aparece no ranking e na sua cartela — assim todo mundo sabe quem é você. 😄
+            </div>
+          </div>
+        )}
         {student.approved === false && (
           <div className="rounded-lg px-3 py-2 mb-3 text-center" style={{ background: C.wineDeep, color: C.amberSoft, fontWeight: 700, fontSize: 13 }}>
             ⏳ Cadastro aguardando liberação da recepção
@@ -3044,6 +3483,154 @@ export default function App() {
             📱 {fmtPhone(student.phone)} · abrir WhatsApp
           </a>
         )}
+        {(() => {
+          const agora = Date.now();
+          const misturadas = [...(gData.miniMissions || []), ...(data.miniMissions || [])].sort((a, b) => (a.id < b.id ? 1 : -1));
+          const souDono = admin || (student.pass && unlocks[student.id] === student.pass);
+          const fazAula = (x) => (student.records || []).some((r) => r.status === "ok" && r.date === x.aulaDate && r.slot === x.aulaSlot);
+          const ativas = misturadas.filter((x) => mmPhase(x, agora) === "ativa");
+          const resultados = misturadas.filter((x) => mmPhase(x, agora) === "resultado");
+          if (!ativas.length && !resultados.length) return null;
+          return (
+            <div className="flex flex-col gap-2 mb-3">
+              {resultados.map((x) => (
+                <button
+                  key={"res" + x.id}
+                  onClick={() => { setMiniPage(x.id); window.scrollTo({ top: 0 }); }}
+                  className="rounded-xl px-4 py-3 text-left"
+                  style={{ background: `linear-gradient(120deg, ${C.oak}22, transparent)`, border: `1.5px solid ${C.oak}`, boxShadow: `0 0 14px ${C.oak}44` }}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div style={{ color: C.oak, fontWeight: 800, fontSize: 13, textTransform: "uppercase" }}>
+                      🏁 ⚡ {x.name} — encerrada!
+                    </div>
+                    <div className="shrink-0" style={{ color: C.oak, fontWeight: 800, fontSize: 12 }}>VER RESULTADO →</div>
+                  </div>
+                </button>
+              ))}
+              {ativas.map((x) => {
+                const eDaAula = x.scope !== "aula" || fazAula(x);
+                return (
+                  <div key={x.id} className="rounded-xl px-4 py-3" style={{ background: C.panel, border: `1.5px solid ${C.amber}`, boxShadow: `0 0 14px ${C.amber}33` }}>
+                    <div className="flex items-center justify-between gap-2">
+                      <div style={{ color: C.amberSoft, fontWeight: 800, fontSize: 13, textTransform: "uppercase" }}>
+                        ⚡ Missão relâmpago: {x.scope === "todos" ? "🌍 " : x.scope === "grupos" ? "🥇 " : x.scope === "aula" ? "🚴 " : ""}{x.name}
+                      </div>
+                      <div className="shrink-0" style={{ color: C.oak, fontWeight: 700, fontSize: 11 }}>
+                        das {fmtHM(mmStartTs(x))} às {fmtHM(mmEndTs(x))}
+                      </div>
+                    </div>
+                    <div style={{ color: C.cream, fontSize: 12.5, lineHeight: 1.55, marginTop: 3 }}>{x.desc}</div>
+                    {x.mode === "slot" && (x.slots || []).length > 0 && (
+                      <div style={{ color: C.amberSoft, fontSize: 12, fontWeight: 700, marginTop: 4 }}>
+                        ⏰ Vale check-in nas aulas: {(x.slots || []).map((sl) => sl.replace(":", "h")).join(" · ")}
+                      </div>
+                    )}
+                    {x.scope === "aula" && (
+                      <div style={{ color: eDaAula ? C.ok : C.oak, fontSize: 12, fontWeight: 700, marginTop: 4 }}>
+                        {eDaAula
+                          ? `✓ Você fez a aula de ${fmtBR(x.aulaDate)} às ${String(x.aulaSlot || "").replace(":", "h")} — pode participar!`
+                          : `🔒 Exclusiva de quem fez check-in na aula de ${fmtBR(x.aulaDate)} às ${String(x.aulaSlot || "").replace(":", "h")}.`}
+                      </div>
+                    )}
+                    <div style={{ color: C.oak, fontSize: 12, fontWeight: 700, marginTop: 4 }}>
+                      🏆 {x.prize} — {x.qty} prêmio{x.qty === 1 ? "" : "s"}
+                      {x.mode === "top" ? " para quem fizer MAIS aulas no período"
+                        : x.mode === "slot" ? " por ordem de chegada"
+                        : x.mode === "sorteio" ? " por sorteio entre quem treinar no período"
+                        : x.mode === "quizText" || x.mode === "quizChoice" ? " para os primeiros que acertarem"
+                        : " por ordem de conquista"}
+                      {x.openMode === "tempo" ? " · resultado sai quando o tempo acabar ⏱️" : ` — restam ${Math.max(0, x.qty - (x.winners || []).length)}`}
+                    </div>
+                    {x.scope !== "todos" && x.scope !== "aula" && x.mode === "top" && (() => {
+                      const parc = miniTop(data, x).slice(0, 3);
+                      return parc.length ? (
+                        <div style={{ color: C.mut, fontSize: 11.5, marginTop: 3 }}>
+                          parcial: {parc.map((w, i) => `${i + 1}º ${w.name} (${w.count})`).join(" · ")}
+                        </div>
+                      ) : null;
+                    })()}
+                    {x.scope !== "todos" && x.scope !== "aula" && x.mode === "slot" && (() => {
+                      const parc = miniSlotFirsts(data, x).slice(0, x.qty);
+                      return parc.length ? (
+                        <div style={{ color: C.mut, fontSize: 11.5, marginTop: 3 }}>
+                          já garantiram: {parc.map((w) => w.name).join(" · ")}
+                        </div>
+                      ) : null;
+                    })()}
+                    {(x.mode === "quizText" || x.mode === "quizChoice") && !admin && souDono && eDaAula && (() => {
+                      const at = (x.attempts || {})[student.id] || { n: 0, ok: false };
+                      const tries = x.tries || 3;
+                      if (at.ok) {
+                        return <div style={{ color: C.ok, fontSize: 12.5, fontWeight: 700, marginTop: 6 }}>
+                          {x.openMode === "tempo" ? "🎉 Resposta certa registrada! Resultado sai quando o tempo acabar." : "🎉 Você acertou e garantiu o prêmio!"}
+                        </div>;
+                      }
+                      if (at.n >= tries) {
+                        return <div style={{ color: C.mut, fontSize: 12, marginTop: 6 }}>Suas {tries} tentativas acabaram — aguarde o resultado! 💪</div>;
+                      }
+                      const responder = () => {
+                        const val = (qzAns[x.id] || "").trim();
+                        if (!val) return;
+                        const certo = x.mode === "quizChoice"
+                          ? normQ(val) === normQ(x.correct || "")
+                          : (x.answers || []).some((a) => normQ(a) === normQ(val));
+                        doMini(x)((d) => {
+                          const xx = (d.miniMissions || []).find((y) => y.id === x.id);
+                          if (!xx) return;
+                          if (mmPhase(xx, Date.now()) !== "ativa") return;
+                          if (!xx.attempts) xx.attempts = {};
+                          const a2 = xx.attempts[student.id] || { n: 0, ok: false };
+                          if (a2.ok || a2.n >= (xx.tries || 3)) return;
+                          if (xx.openMode !== "tempo" && (xx.winners || []).length >= xx.qty) return;
+                          a2.n += 1;
+                          const ok2 = xx.mode === "quizChoice"
+                            ? normQ(val) === normQ(xx.correct || "")
+                            : (xx.answers || []).some((a) => normQ(a) === normQ(val));
+                          if (!xx.log) xx.log = [];
+                          xx.log.push({ sid: student.id, name: student.name, ans: val, ok: ok2, ts: Date.now() });
+                          if (ok2) {
+                            a2.ok = true;
+                            if (!xx.winners) xx.winners = [];
+                            if (xx.winners.length < xx.qty) xx.winners.push({ id: student.id, name: student.name, ts: Date.now() });
+                          }
+                          xx.attempts[student.id] = a2;
+                        });
+                        setQzMsg({ ...qzMsg, [x.id]: certo
+                          ? (x.openMode === "tempo" ? "🎉 Certa resposta! Registrada — resultado no fim do tempo." : "🎉 Acertou! Prêmio garantido — sua medalha ⚡ já está na cartela.")
+                          : `Não foi dessa vez… restam ${tries - at.n - 1} tentativa${tries - at.n - 1 === 1 ? "" : "s"}.` });
+                        setQzAns({ ...qzAns, [x.id]: "" });
+                      };
+                      return (
+                        <div className="mt-2">
+                          {x.mode === "quizChoice" ? (
+                            <select value={qzAns[x.id] || ""} onChange={(e) => { setQzAns({ ...qzAns, [x.id]: e.target.value }); setQzMsg({ ...qzMsg, [x.id]: "" }); }}
+                              className="w-full rounded-lg px-3 py-2 outline-none mb-1.5"
+                              style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: qzAns[x.id] ? C.cream : C.mut }}>
+                              <option value="" disabled>Escolha sua resposta…</option>
+                              {(x.options || []).map((o) => <option key={o} value={o}>{o}</option>)}
+                            </select>
+                          ) : (
+                            <input value={qzAns[x.id] || ""}
+                              onChange={(e) => { setQzAns({ ...qzAns, [x.id]: e.target.value }); setQzMsg({ ...qzMsg, [x.id]: "" }); }}
+                              onKeyDown={(e) => e.key === "Enter" && responder()}
+                              placeholder="Digite sua resposta…"
+                              className="w-full rounded-lg px-3 py-2 outline-none mb-1.5"
+                              style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream }} />
+                          )}
+                          <button onClick={responder} className="w-full rounded-lg py-2 font-bold" style={{ background: C.amber, color: C.cream, fontSize: 13 }}>
+                            Responder ({tries - at.n} tentativa{tries - at.n === 1 ? "" : "s"} restante{tries - at.n === 1 ? "" : "s"})
+                          </button>
+                          {qzMsg[x.id] && <div className="mt-1.5 text-center" style={{ color: qzMsg[x.id].startsWith("🎉") ? C.ok : C.amberSoft, fontSize: 12 }}>{qzMsg[x.id]}</div>}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
         <div className="grid grid-cols-3 gap-2">
           {(() => {
             const lineCells = new Set();
@@ -3067,131 +3654,25 @@ export default function App() {
           </div>
         )}
 
-        {/* Missões relâmpago: alerta abaixo da cartela */}
         {(() => {
-          const ativas = (data.miniMissions || []).filter((x) => (x.start || "") <= todayStr() && x.end >= todayStr() && (x.winners || []).length < x.qty);
-          const vencidas = (data.miniMissions || []).filter((x) => (x.winners || []).some((w) => w.id === student.id));
-          if (!ativas.length && !vencidas.length) return null;
+          const misturadas = [...(gData.miniMissions || []), ...(data.miniMissions || [])];
+          const vencidas = misturadas.filter((x) => (x.winners || []).some((w) => w.id === student.id));
+          if (!vencidas.length) return null;
           return (
-            <div className="flex flex-col gap-2 mt-3">
-              {ativas.map((x) => (
-                <div key={x.id} className="rounded-xl px-4 py-3" style={{ background: C.panel, border: `1.5px solid ${C.amber}`, boxShadow: `0 0 14px ${C.amber}33` }}>
-                  <div className="flex items-center justify-between gap-2">
-                    <div style={{ color: C.amberSoft, fontWeight: 800, fontSize: 13, textTransform: "uppercase" }}>⚡ Missão relâmpago: {x.name}</div>
-                    <div className="shrink-0" style={{ color: C.oak, fontWeight: 700, fontSize: 11 }}>
-                      {x.end === todayStr() ? "SÓ HOJE!" : `até ${fmtBR(x.end)}`}
-                    </div>
-                  </div>
-                  <div style={{ color: C.cream, fontSize: 12.5, lineHeight: 1.55, marginTop: 3 }}>{x.desc}</div>
-                  {x.mode === "slot" && (x.slots || []).length > 0 && (
-                    <div style={{ color: C.amberSoft, fontSize: 12, fontWeight: 700, marginTop: 4 }}>
-                      ⏰ Vale check-in nas aulas: {(x.slots || []).map((sl) => sl.replace(":", "h")).join(" · ")}
-                    </div>
-                  )}
-                  <div style={{ color: C.oak, fontSize: 12, fontWeight: 700, marginTop: 4 }}>
-                    🏆 {x.prize} — {x.qty} prêmio{x.qty === 1 ? "" : "s"}
-                    {x.mode === "top" ? " para quem fizer MAIS aulas no período"
-                      : x.mode === "slot" ? " por ordem de chegada"
-                      : x.mode === "sorteio" ? " por sorteio entre quem treinar no período"
-                      : x.mode === "quizText" || x.mode === "quizChoice" ? " para os primeiros que acertarem"
-                      : " por ordem de conquista"}
-                    {x.mode !== "sorteio" ? ` — restam ${x.qty - (x.winners || []).length}` : ""}
-                  </div>
-                  {x.mode === "top" && (() => {
-                    const parc = miniTop(data, x).slice(0, 3);
-                    return parc.length ? (
-                      <div style={{ color: C.mut, fontSize: 11.5, marginTop: 3 }}>
-                        parcial: {parc.map((w, i) => `${i + 1}º ${w.name} (${w.count})`).join(" · ")}
-                      </div>
-                    ) : null;
-                  })()}
-                  {x.mode === "slot" && (() => {
-                    const parc = miniSlotFirsts(data, x).slice(0, x.qty);
-                    return parc.length ? (
-                      <div style={{ color: C.mut, fontSize: 11.5, marginTop: 3 }}>
-                        já garantiram: {parc.map((w) => w.name).join(" · ")}
-                      </div>
-                    ) : null;
-                  })()}
-                  {(x.mode === "quizText" || x.mode === "quizChoice") && !admin && student.pass && unlocks[student.id] === student.pass && (() => {
-                    const at = (x.attempts || {})[student.id] || { n: 0, ok: false };
-                    const tries = x.tries || 3;
-                    if (at.ok) {
-                      return <div style={{ color: C.ok, fontSize: 12.5, fontWeight: 700, marginTop: 6 }}>🎉 Você acertou e garantiu o prêmio!</div>;
-                    }
-                    if (at.n >= tries) {
-                      return <div style={{ color: C.mut, fontSize: 12, marginTop: 6 }}>Suas {tries} tentativas acabaram — fica pra próxima! 💪</div>;
-                    }
-                    const responder = () => {
-                      const val = (qzAns[x.id] || "").trim();
-                      if (!val) return;
-                      const certo = x.mode === "quizChoice"
-                        ? normQ(val) === normQ(x.correct || "")
-                        : (x.answers || []).some((a) => normQ(a) === normQ(val));
-                      mutate((d) => {
-                        const xx = (d.miniMissions || []).find((y) => y.id === x.id);
-                        const s = d.students.find((y) => y.id === view);
-                        if (!xx || !s) return;
-                        if (!xx.attempts) xx.attempts = {};
-                        const a2 = xx.attempts[s.id] || { n: 0, ok: false };
-                        if (a2.ok || a2.n >= (xx.tries || 3) || (xx.winners || []).length >= xx.qty) return;
-                        a2.n += 1;
-                        const ok2 = xx.mode === "quizChoice"
-                          ? normQ(val) === normQ(xx.correct || "")
-                          : (xx.answers || []).some((a) => normQ(a) === normQ(val));
-                        if (ok2) {
-                          a2.ok = true;
-                          if (!xx.winners) xx.winners = [];
-                          xx.winners.push({ id: s.id, name: s.name, ts: Date.now() });
-                        }
-                        xx.attempts[s.id] = a2;
-                      });
-                      setQzMsg({ ...qzMsg, [x.id]: certo ? "🎉 Acertou! Prêmio garantido — sua medalha ⚡ já está na cartela." : `Não foi dessa vez… restam ${tries - at.n - 1} tentativa${tries - at.n - 1 === 1 ? "" : "s"}.` });
-                      setQzAns({ ...qzAns, [x.id]: "" });
-                    };
-                    return (
-                      <div className="mt-2">
-                        {x.mode === "quizChoice" ? (
-                          <select value={qzAns[x.id] || ""} onChange={(e) => { setQzAns({ ...qzAns, [x.id]: e.target.value }); setQzMsg({ ...qzMsg, [x.id]: "" }); }}
-                            className="w-full rounded-lg px-3 py-2 outline-none mb-1.5"
-                            style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: qzAns[x.id] ? C.cream : C.mut }}>
-                            <option value="" disabled>Escolha sua resposta…</option>
-                            {(x.options || []).map((o) => <option key={o} value={o}>{o}</option>)}
-                          </select>
-                        ) : (
-                          <input value={qzAns[x.id] || ""}
-                            onChange={(e) => { setQzAns({ ...qzAns, [x.id]: e.target.value }); setQzMsg({ ...qzMsg, [x.id]: "" }); }}
-                            onKeyDown={(e) => e.key === "Enter" && responder()}
-                            placeholder="Digite sua resposta…"
-                            className="w-full rounded-lg px-3 py-2 outline-none mb-1.5"
-                            style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream }} />
-                        )}
-                        <button onClick={responder} className="w-full rounded-lg py-2 font-bold" style={{ background: C.amber, color: C.cream, fontSize: 13 }}>
-                          Responder ({tries - at.n} tentativa{tries - at.n === 1 ? "" : "s"} restante{tries - at.n === 1 ? "" : "s"})
-                        </button>
-                        {qzMsg[x.id] && <div className="mt-1.5 text-center" style={{ color: qzMsg[x.id].startsWith("🎉") ? C.ok : C.amberSoft, fontSize: 12 }}>{qzMsg[x.id]}</div>}
-                      </div>
-                    );
-                  })()}
-                </div>
-              ))}
-              {vencidas.length > 0 && (
-                <div className="rounded-xl px-4 py-3" style={{ background: C.panelSoft, border: `1px solid ${C.oak}` }}>
-                  <div style={{ color: C.oak, fontWeight: 800, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 4 }}>
-                    ⚡ Medalhas relâmpago
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {vencidas.map((x) => {
-                      const posV = (x.winners || []).findIndex((w) => w.id === student.id) + 1;
-                      return (
-                        <span key={x.id} className="rounded-full px-2.5 py-1" style={{ background: `linear-gradient(120deg, #D9A954, #B08D3E)`, color: "#141414", fontSize: 11, fontWeight: 800 }}>
-                          ⚡ {posV}º · {x.name}
-                        </span>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
+            <div className="rounded-xl px-4 py-3 mt-3" style={{ background: C.panelSoft, border: `1px solid ${C.oak}` }}>
+              <div style={{ color: C.oak, fontWeight: 800, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 4 }}>
+                ⚡ Medalhas relâmpago
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {vencidas.map((x) => {
+                  const posV = (x.winners || []).findIndex((w) => w.id === student.id) + 1;
+                  return (
+                    <span key={x.id} className="rounded-full px-2.5 py-1" style={{ background: `linear-gradient(120deg, #D9A954, #B08D3E)`, color: "#141414", fontSize: 11, fontWeight: 800 }}>
+                      ⚡ {posV}º · {x.name}
+                    </span>
+                  );
+                })}
+              </div>
             </div>
           );
         })()}
@@ -3251,7 +3732,7 @@ export default function App() {
 
         {/* Registrar aula */}
         {(admin || (student.pass && unlocks[student.id] === student.pass)) && student.approved !== false && (
-        <section className="rounded-xl p-4 mt-6" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+        <section id="sec-registrar" className="rounded-xl p-4 mt-6" style={{ background: C.panel, border: `1px solid ${C.line}`, scrollMarginTop: 16 }}>
           <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, letterSpacing: "0.25em", color: C.oak, textTransform: "uppercase", marginBottom: 10 }}>
             {admin ? "Registrar aula (validada)" : "Registrar minha aula"}
           </div>
@@ -3301,6 +3782,15 @@ export default function App() {
             )}
           </div>
         </section>
+        )}
+        {!admin && student.pass && unlocks[student.id] === student.pass && (
+          <button
+            onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+            className="w-full rounded-lg py-2 mt-2"
+            style={{ color: C.oak, fontSize: 12, border: `1px dashed ${C.line}`, background: "transparent" }}
+          >
+            ↑ Voltar ao topo
+          </button>
         )}
 
         {/* Amigos */}
@@ -3487,6 +3977,9 @@ export default function App() {
 
           {(admin || (student.pass && unlocks[student.id] === student.pass)) && (
           <div className="flex flex-col gap-2">
+            <div style={{ color: C.mut, fontSize: 11.5, lineHeight: 1.5 }}>
+              📅 A data e o ⏰ horário abaixo são <b style={{ color: C.cream }}>da aula que o SEU CONVIDADO vai fazer</b> — a aula experimental que ele ganhou de você. A marcação é feita com a recepção (nome completo, telefone e e-mail dele).
+            </div>
             <input
               value={gform.name}
               onChange={(e) => { setGform({ ...gform, name: e.target.value }); setGErr(""); }}
@@ -3494,6 +3987,17 @@ export default function App() {
               className="rounded-lg px-3 py-2 outline-none"
               style={{ background: C.panelSoft, border: `1px solid ${gErr ? "#B15560" : C.line}`, color: C.cream }}
             />
+            <select
+              value={gform.kind}
+              onChange={(e) => setGform({ ...gform, kind: e.target.value })}
+              className="rounded-lg px-3 py-2 outline-none"
+              style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream }}
+            >
+              <option value="novo">🆕 Convidado novo (nunca pedalou na Spin ou sumido há 6+ meses)</option>
+              <option value="spin" disabled={(student.guests || []).filter((g) => g.kind === "spin").length >= 2}>
+                📣 ALUNO CONVIDADO AO DESAFIO (máx. 2)
+              </option>
+            </select>
             <div className="flex gap-2">
               <input
                 type="date" value={gform.date}
