@@ -89,6 +89,18 @@ const fmtTs = (ts) => { const d = new Date(ts); const p = (n) => String(n).padSt
 const weekdayBR = (s) => toDate(s).toLocaleDateString("pt-BR", { weekday: "short" });
 const norm = (s) => (s || "").trim().replace(/\s+/g, " ").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 const normQ = (s) => norm(s).replace(/[^a-z0-9 ]/g, "").replace(/\s+/g, " ").trim();
+const normPhone = (s) => (s || "").replace(/\D/g, "").replace(/^55/, "");
+const phonesMatch = (a, b) => {
+  const x = normPhone(a), y = normPhone(b);
+  if (!x || !y || x.length < 8 || y.length < 8) return false;
+  return x === y || x.slice(-10) === y.slice(-10) || x.slice(-8) === y.slice(-8);
+};
+const fmtPhone = (s) => {
+  const d = normPhone(s);
+  if (d.length === 11) return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+  if (d.length === 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
+  return s || "";
+};
 const todayStr = () => {
   const d = new Date();
   const p = (n) => String(n).padStart(2, "0");
@@ -622,10 +634,10 @@ export default function App() {
   const [loginName, setLoginName] = useState("");
   const [loginPass, setLoginPass] = useState("");
   const [loginErr, setLoginErr] = useState("");
-  const [form, setForm] = useState({ date: todayStr(), slot: "18:30", instructor: "" });
-  const [qform, setQform] = useState({ studentId: "", date: todayStr(), slot: "18:30", instructor: "" });
+  const [form, setForm] = useState({ date: todayStr(), slot: "", instructor: "" });
+  const [qform, setQform] = useState({ studentId: "", date: todayStr(), slot: "", instructor: "" });
   const [qsaved, setQsaved] = useState(false);
-  const [gform, setGform] = useState({ name: "", date: todayStr(), slot: "18:30", kind: "novo" });
+  const [gform, setGform] = useState({ name: "", date: todayStr(), slot: "", kind: "novo" });
   const [gErr, setGErr] = useState("");
   const [gSaved, setGSaved] = useState(false);
   const [detailMission, setDetailMission] = useState(null);
@@ -642,6 +654,17 @@ export default function App() {
   const [addOpen, setAddOpen] = useState("");
   const [syncMsg, setSyncMsg] = useState("");
   const avisar = (m) => { setSyncMsg(m); setTimeout(() => setSyncMsg(""), 6000); };
+  const [newPhone, setNewPhone] = useState("");
+  const [recMode, setRecMode] = useState(false);
+  const [rcName, setRcName] = useState("");
+  const [rcPhone, setRcPhone] = useState("");
+  const [rcPass, setRcPass] = useState("");
+  const [rcErr, setRcErr] = useState("");
+  const [rcStep, setRcStep] = useState(1);
+  const [fixPhone, setFixPhone] = useState("");
+  const [editG, setEditG] = useState(null);
+  const [editP, setEditP] = useState(null);
+  const [trackCounts, setTrackCounts] = useState({});
   const [allData, setAllData] = useState({});
   const [showPend, setShowPend] = useState(false);
   const [showEntry, setShowEntry] = useState(false);
@@ -687,6 +710,22 @@ export default function App() {
       } catch { /* mantém o estado atual */ }
     }, 30000);
     return () => { alive = false; clearInterval(t); };
+  }, [track]);
+
+  useEffect(() => {
+    if (track) return;
+    let alive = true;
+    (async () => {
+      const out = {};
+      for (const t of TRACKS) {
+        try {
+          const d = await loadData(t.id);
+          out[t.id] = (d.students || []).filter((s) => s.approved !== false).length;
+        } catch { out[t.id] = null; }
+      }
+      if (alive) setTrackCounts(out);
+    })();
+    return () => { alive = false; };
   }, [track]);
 
   useEffect(() => {
@@ -1006,7 +1045,12 @@ export default function App() {
                     <div className="flex flex-col gap-1">
                       {cadastros.map((s) => (
                         <div key={s.id} className="rounded-lg px-3 py-2 flex items-center gap-2" style={{ background: C.panelSoft, border: `1px dashed ${C.line}` }}>
-                          <div className="flex-1 min-w-0 truncate" style={{ color: C.cream, fontWeight: 700, fontSize: 13 }}>{s.name}</div>
+                          <div className="flex-1 min-w-0">
+                            <div className="truncate" style={{ color: C.cream, fontWeight: 700, fontSize: 13 }}>{s.name}</div>
+                            {s.phone && (
+                              <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 10.5, color: C.mut }}>📱 {fmtPhone(s.phone)}</div>
+                            )}
+                          </div>
                           <button onClick={() => liberar(t.id, s.id)} className="rounded px-2.5 py-1 font-bold" style={{ background: C.ok, color: C.bg, fontSize: 12 }}>Liberar</button>
                         </div>
                       ))}
@@ -1023,19 +1067,75 @@ export default function App() {
                       </button>
                     </div>
                     <div className="flex flex-col gap-1">
-                      {itens.map(({ tipo, s, it }) => (
-                        <div key={it.id} className="rounded-lg px-3 py-2 flex items-center gap-2" style={{ background: C.panelSoft, border: `1px solid ${C.amber}55` }}>
-                          <div className="flex-1 min-w-0">
-                            <div className="truncate" style={{ color: C.cream, fontWeight: 700, fontSize: 13 }}>{s.name}</div>
-                            <div style={{ color: C.mut, fontSize: 11.5, fontFamily: "'DM Mono', monospace" }}>
-                              {tipo === "rec"
-                                ? `aula · ${fmtBR(it.date)} · ${it.slot.replace(":", "h")} · ${it.instructor}`
-                                : `amigo · ${it.name} · ${fmtBR(it.date)} · ${it.slot.replace(":", "h")}`}
+                      {itens.map(({ tipo, s, it }) => {
+                        const editando = editP && editP.tid === t.id && editP.id === it.id;
+                        const slotsEd = editando && editP.date && isWeekendDate(editP.date) ? WEEKEND_SLOTS : WEEKDAY_SLOTS;
+                        return (
+                        <div key={it.id} className="rounded-lg px-3 py-2" style={{ background: C.panelSoft, border: `1px solid ${C.amber}55` }}>
+                          <div className="flex items-center gap-2">
+                            <div className="flex-1 min-w-0">
+                              <div className="truncate" style={{ color: C.cream, fontWeight: 700, fontSize: 13 }}>{s.name}</div>
+                              {!editando && (
+                                <div style={{ color: C.mut, fontSize: 11.5, fontFamily: "'DM Mono', monospace" }}>
+                                  {tipo === "rec"
+                                    ? `aula · ${fmtBR(it.date)} · ${it.slot.replace(":", "h")} · ${it.instructor}`
+                                    : `amigo · ${it.name} · ${fmtBR(it.date)} · ${it.slot.replace(":", "h")}`}
+                                </div>
+                              )}
                             </div>
+                            {tipo === "rec" && !editando && (
+                              <button
+                                onClick={() => setEditP({ tid: t.id, sid: s.id, id: it.id, date: it.date, slot: it.slot, instructor: it.instructor })}
+                                className="shrink-0 rounded px-1" title="Corrigir data/horário/professor"
+                                style={{ background: "transparent", border: "none", fontSize: 13, cursor: "pointer", opacity: 0.8 }}
+                              >✏️</button>
+                            )}
+                            {!editando && (
+                              <button onClick={() => validarItem(t.id, s.id, tipo, it.id)} className="rounded px-2.5 py-1 font-bold shrink-0" style={{ background: C.ok, color: C.bg, fontSize: 12 }}>✓</button>
+                            )}
                           </div>
-                          <button onClick={() => validarItem(t.id, s.id, tipo, it.id)} className="rounded px-2.5 py-1 font-bold" style={{ background: C.ok, color: C.bg, fontSize: 12 }}>✓</button>
+                          {editando && (
+                            <div className="mt-2 flex flex-col gap-1.5">
+                              <div className="flex gap-1.5">
+                                <input type="date" value={editP.date} min={DESAFIO_INICIO} max={todayStr()}
+                                  onChange={(e) => {
+                                    const nd = e.target.value;
+                                    const vs = nd && isWeekendDate(nd) ? WEEKEND_SLOTS : WEEKDAY_SLOTS;
+                                    setEditP({ ...editP, date: nd, slot: vs.includes(editP.slot) ? editP.slot : "" });
+                                  }}
+                                  className="flex-1 rounded px-2 py-1.5 outline-none"
+                                  style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.cream, fontSize: 12, colorScheme: "dark" }} />
+                                <select value={editP.slot} onChange={(e) => setEditP({ ...editP, slot: e.target.value })}
+                                  className="rounded px-2 py-1.5 outline-none"
+                                  style={{ background: C.panel, border: `1px solid ${C.line}`, color: editP.slot ? C.cream : C.mut, fontSize: 12 }}>
+                                  <option value="" disabled>— horário —</option>
+                                  {slotsEd.map((sl) => <option key={sl} value={sl}>{sl.replace(":", "h")}</option>)}
+                                </select>
+                              </div>
+                              <div className="flex gap-1.5">
+                                <select value={editP.instructor} onChange={(e) => setEditP({ ...editP, instructor: e.target.value })}
+                                  className="flex-1 rounded px-2 py-1.5 outline-none"
+                                  style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.cream, fontSize: 12 }}>
+                                  {INSTRUCTORS.map((i) => <option key={i} value={i}>{i}</option>)}
+                                </select>
+                                <button
+                                  onClick={() => {
+                                    if (!editP.slot || !editP.date) { avisar("Escolha data e horário."); return; }
+                                    mutateTrack(editP.tid, (d) => {
+                                      const s4 = d.students.find((x) => x.id === editP.sid);
+                                      const r4 = s4 && (s4.records || []).find((x) => x.id === editP.id);
+                                      if (r4) { r4.date = editP.date; r4.slot = editP.slot; r4.instructor = editP.instructor; }
+                                    });
+                                    setEditP(null);
+                                  }}
+                                  className="rounded px-2.5 font-bold" style={{ background: C.ok, color: C.bg, fontSize: 12 }}>✓ salvar</button>
+                                <button onClick={() => setEditP(null)} className="rounded px-2" style={{ color: C.mut, fontSize: 12, border: `1px solid ${C.line}` }}>✕</button>
+                              </div>
+                            </div>
+                          )}
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -1083,6 +1183,11 @@ export default function App() {
                   {t.label}
                 </div>
                 <div style={{ color: C.mut, fontSize: 12, marginTop: 2 }}>{t.sub}</div>
+                {trackCounts[t.id] != null && (
+                  <div style={{ color: C.amberSoft, fontSize: 11.5, marginTop: 5, fontWeight: 700 }}>
+                    👥 {trackCounts[t.id]} participante{trackCounts[t.id] === 1 ? "" : "s"}
+                  </div>
+                )}
                 {t.note && (
                   <div style={{ color: C.oak, fontSize: 10.5, marginTop: 6, fontStyle: "italic" }}>{t.note}</div>
                 )}
@@ -1260,11 +1365,12 @@ export default function App() {
           {card(
             <div className="flex flex-col gap-2">
               <div style={{ fontSize: 12.5 }}>Cada aluno tem uma <b>cartela com 9 missões</b>. Complete missões para acender ursinhos, formar linhas e concorrer aos prêmios. Tudo acontece pelo app:</div>
-              {bullet(<span><b>Cadastre-se</b> com nome e sobrenome e crie sua senha (só você acessa sua cartela).</span>, 1)}
+              {bullet(<span><b>Cadastre-se</b> com nome e sobrenome, crie sua senha e informe seu WhatsApp (só você acessa sua cartela — e o WhatsApp é sua chave se esquecer a senha).</span>, 1)}
               {bullet(<span>A recepção <b>libera seu cadastro</b> e você já pode registrar.</span>, 2)}
               {bullet(<span><b>Registre cada aula</b> no app (data, horário e professor). O registro fica <b>pendente</b> até a recepção validar.</span>, 3)}
               {bullet(<span>Esqueceu de registrar? Sem pânico: dá para registrar <b>dias anteriores</b> (a partir de 6/ago). Datas futuras não valem.</span>, 4)}
               {bullet(<span>Existem <b>3 desafios separados</b> — Ilimitados, Pacotes e Híbridos. Cada grupo compete apenas entre si, com metas ajustadas ao seu ritmo.</span>, 5)}
+              {bullet(<span><b>Esqueceu a senha?</b> Toque em "🔑 Esqueci minha senha", confirme seu nome + o WhatsApp cadastrado e crie uma nova na hora — sem precisar da recepção.</span>, 7)}
               {bullet(
                 track === "ilimitado" ? (
                   <span><b>O que vale neste desafio:</b> as aulas do seu plano ilimitado (Spin Mensal, Spin Ilimitado ou Spin & Strong Ilimitado). O que conta é pedalar! 🚴</span>
@@ -1391,13 +1497,18 @@ export default function App() {
       setNameErr("Crie uma senha com pelo menos 4 caracteres.");
       return;
     }
+    const ph = normPhone(newPhone);
+    if (ph.length < 10 || ph.length > 11) {
+      setNameErr("Digite seu WhatsApp com DDD, só números, sem espaços (ex.: 18999342345).");
+      return;
+    }
     const nid = Date.now().toString(36);
-    mutate((d) => d.students.push({ id: nid, name, pass: pw, friends: 0, guests: [], records: [], approved: admin }));
+    mutate((d) => d.students.push({ id: nid, name, pass: pw, phone: ph, friends: 0, guests: [], records: [], approved: admin }));
     const nu = { ...unlocks, [nid]: pw };
     setUnlocks(nu); saveUnlocks(nu);
     const nm = { ...myIds, [track]: nid };
     setMyIds(nm); saveMyIds(nm);
-    setNewName(""); setNewPass("");
+    setNewName(""); setNewPass(""); setNewPhone("");
     setNameErr("");
     if (!admin) { setShowSignup(false); setRegOk(true); setTimeout(() => setRegOk(false), 6000); }
   };
@@ -1410,6 +1521,7 @@ export default function App() {
 
   const addRecord = () => {
     if (!form.date || !form.instructor) return;
+    if (!form.slot) { setRecErr("Selecione o horário da aula."); return; }
     const e = validaData(form.date);
     if (e) { setRecErr(e); return; }
     const dup = (student.records || []).some((r) => r.status !== "removed" && r.date === form.date && r.slot === form.slot);
@@ -1435,6 +1547,7 @@ export default function App() {
 
   const addQuickRecord = () => {
     if (!qform.studentId || !qform.date || !qform.instructor) return;
+    if (!qform.slot) { setQErr("Selecione o horário da aula."); return; }
     const e = validaData(qform.date);
     if (e) { setQErr(e); return; }
     const alvoQ = data.students.find((x) => x.id === qform.studentId);
@@ -1467,6 +1580,7 @@ export default function App() {
       setGErr("Digite o nome completo do amigo (nome e sobrenome).");
       return;
     }
+    if (!gform.slot) { setGErr("Selecione o horário da aula experimental."); return; }
     const eData = validaData(gform.date);
     if (eData) { setGErr(eData); return; }
     const jaConvidado = data.students.some((s) => (s.guests || []).some((g) => norm(g.name) === norm(name)));
@@ -1488,7 +1602,7 @@ export default function App() {
         status: admin ? "ok" : "pending",
       });
     });
-    setGform({ name: "", date: todayStr(), slot: "18:30", kind: "novo" });
+    setGform({ name: "", date: todayStr(), slot: "", kind: "novo" });
     setGErr("");
     setGSaved(true);
     setTimeout(() => setGSaved(false), 3000);
@@ -1570,11 +1684,23 @@ export default function App() {
                   type="password"
                   value={newPass}
                   onChange={(e) => { setNewPass(e.target.value); setNameErr(""); }}
-                  onKeyDown={(e) => e.key === "Enter" && addStudent()}
                   placeholder="Crie uma senha (mín. 4 caracteres)"
                   className="rounded-lg px-4 py-3 outline-none"
                   style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream }}
                 />
+                <input
+                  type="tel"
+                  inputMode="numeric"
+                  value={newPhone}
+                  onChange={(e) => { setNewPhone(e.target.value.replace(/\D/g, "").replace(/^0+/, "").slice(0, 11)); setNameErr(""); }}
+                  onKeyDown={(e) => e.key === "Enter" && addStudent()}
+                  placeholder="Seu WhatsApp — só números (ex.: 18999342345)"
+                  className="rounded-lg px-4 py-3 outline-none"
+                  style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream }}
+                />
+                <div style={{ color: C.mut, fontSize: 11, marginTop: -4 }}>
+                  📱 Usado apenas para recuperar sua senha e contatos do desafio — só a administração vê.
+                </div>
                 <button onClick={addStudent} className="rounded-lg py-3 font-bold" style={{ background: C.amber, color: C.cream }}>
                   Entrar no desafio
                 </button>
@@ -1628,6 +1754,7 @@ export default function App() {
           <h2 className="mt-4 mb-3" style={{ fontFamily: "'Montserrat', sans-serif", fontWeight: 800, fontSize: 24, color: C.amberSoft, textTransform: "uppercase", letterSpacing: "0.03em" }}>
             Minhas missões
           </h2>
+          {!recMode ? (
           <section className="rounded-xl p-4" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
             <p style={{ color: C.mut, fontSize: 13, marginBottom: 12 }}>
               Escolha seu nome e digite sua senha para abrir sua cartela.
@@ -1654,7 +1781,96 @@ export default function App() {
             <button onClick={tryLogin} className="w-full rounded-lg py-3 font-bold" style={{ background: `linear-gradient(120deg, ${C.amber}, #16696F)`, color: C.cream }}>
               Entrar
             </button>
+            <button
+              onClick={() => { setRecMode(true); setRcName(loginName.trim()); setRcPhone(""); setRcPass(""); setRcErr(""); setRcStep(1); }}
+              className="block w-full text-center mt-3"
+              style={{ color: C.oak, fontSize: 12.5, textDecoration: "underline", textUnderlineOffset: 3, background: "transparent", border: "none" }}
+            >
+              🔑 Esqueci minha senha
+            </button>
           </section>
+          ) : (
+          <section className="rounded-xl p-4" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+            <p style={{ color: C.mut, fontSize: 13, marginBottom: 12 }}>
+              🔑 Recuperar senha: confirme seu nome e o WhatsApp que você cadastrou.
+            </p>
+            <input
+              value={rcName}
+              disabled={rcStep === 2}
+              onChange={(e) => { setRcName(e.target.value); setRcErr(""); }}
+              placeholder="Seu nome e sobrenome"
+              className="w-full rounded-lg px-4 py-3 outline-none mb-2"
+              style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream, opacity: rcStep === 2 ? 0.6 : 1 }}
+            />
+            <input
+              type="tel"
+              inputMode="numeric"
+              value={rcPhone}
+              disabled={rcStep === 2}
+              onChange={(e) => { setRcPhone(e.target.value.replace(/\D/g, "").replace(/^0+/, "").slice(0, 11)); setRcErr(""); }}
+              placeholder="Seu WhatsApp (só números, ex.: 18999342345)"
+              className="w-full rounded-lg px-4 py-3 outline-none mb-2"
+              style={{ background: C.panelSoft, border: `1px solid ${rcErr && rcStep === 1 ? "#B15560" : C.line}`, color: C.cream, opacity: rcStep === 2 ? 0.6 : 1 }}
+            />
+            {rcStep === 1 ? (
+              <>
+                {rcErr && <div className="mb-2" style={{ color: "#C96A76", fontSize: 12 }}>{rcErr}</div>}
+                <button
+                  onClick={() => {
+                    const s = data.students.find((x) => norm(x.name) === norm(rcName));
+                    if (!s) { setRcErr("Não encontramos esse nome neste desafio — confira se você está no desafio certo (Ilimitados, Pacotes ou Híbridos)."); return; }
+                    if (!s.phone) { setRcErr("Seu cadastro ainda não tem WhatsApp registrado. Toque no botão 💬 AJUDA que a recepção redefine rapidinho."); return; }
+                    if (!phonesMatch(s.phone, rcPhone)) { setRcErr("O WhatsApp digitado não confere com o do cadastro."); return; }
+                    setRcErr(""); setRcStep(2);
+                  }}
+                  className="w-full rounded-lg py-3 font-bold"
+                  style={{ background: `linear-gradient(120deg, ${C.amber}, #16696F)`, color: C.cream }}
+                >
+                  Verificar
+                </button>
+              </>
+            ) : (
+              <>
+                <div className="mb-2" style={{ color: C.ok, fontSize: 12.5, fontWeight: 700 }}>✓ Identidade confirmada! Agora crie sua nova senha:</div>
+                <input
+                  type="password"
+                  autoFocus
+                  value={rcPass}
+                  onChange={(e) => { setRcPass(e.target.value); setRcErr(""); }}
+                  placeholder="Nova senha (mín. 4 caracteres)"
+                  className="w-full rounded-lg px-4 py-3 outline-none mb-2"
+                  style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream }}
+                />
+                {rcErr && <div className="mb-2" style={{ color: "#C96A76", fontSize: 12 }}>{rcErr}</div>}
+                <button
+                  onClick={() => {
+                    const pw = rcPass.trim();
+                    if (pw.length < 4) { setRcErr("A senha precisa de pelo menos 4 caracteres."); return; }
+                    const s = data.students.find((x) => norm(x.name) === norm(rcName));
+                    if (!s) { setRcErr("Algo deu errado — recomece."); setRcStep(1); return; }
+                    mutate((d) => { const s2 = d.students.find((x) => x.id === s.id); if (s2) s2.pass = pw; });
+                    const nu = { ...unlocks, [s.id]: pw }; setUnlocks(nu); saveUnlocks(nu);
+                    const nm = { ...myIds, [track]: s.id }; setMyIds(nm); saveMyIds(nm);
+                    setRecMode(false); setRcName(""); setRcPhone(""); setRcPass(""); setRcStep(1);
+                    setLoginMode(false);
+                    setView(s.id); setDetailMission(null); setShowAllHist(false); setConfirmRemove(false);
+                  }}
+                  className="w-full rounded-lg py-3 font-bold"
+                  style={{ background: `linear-gradient(120deg, ${C.amber}, #16696F)`, color: C.cream }}
+                >
+                  Salvar nova senha e entrar
+                </button>
+              </>
+            )}
+            <button
+              onClick={() => { setRecMode(false); setRcErr(""); setRcStep(1); }}
+              className="block w-full text-center mt-3"
+              style={{ color: C.oak, fontSize: 12.5, background: "transparent", border: "none" }}
+            >
+              ← voltar ao login
+            </button>
+          </section>
+          )}
           {footerNote}
           <div className="flex justify-center pb-8">{helpBtn}</div>
         </main>
@@ -2239,7 +2455,7 @@ export default function App() {
                       const date = e.target.value;
                       setQErr("");
                       const valid = date && isWeekendDate(date) ? WEEKEND_SLOTS : WEEKDAY_SLOTS;
-                      setQform({ ...qform, date, slot: valid.includes(qform.slot) ? qform.slot : valid[0] });
+                      setQform({ ...qform, date, slot: valid.includes(qform.slot) ? qform.slot : "" });
                     }}
                     className="flex-1 rounded-lg px-3 py-2 outline-none"
                     style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream, colorScheme: "dark" }}
@@ -2248,8 +2464,9 @@ export default function App() {
                     value={qform.slot}
                     onChange={(e) => setQform({ ...qform, slot: e.target.value })}
                     className="rounded-lg px-3 py-2 outline-none"
-                    style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream }}
+                    style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: qform.slot ? C.cream : C.mut }}
                   >
+                    <option value="" disabled>— horário —</option>
                     {(qform.date && isWeekendDate(qform.date) ? WEEKEND_SLOTS : WEEKDAY_SLOTS).map((s) => (
                       <option key={s} value={s}>{s.replace(":", "h")}</option>
                     ))}
@@ -2342,6 +2559,15 @@ export default function App() {
             <button onClick={tryEnter} className="w-full rounded-lg py-3 font-bold" style={{ background: `linear-gradient(120deg, ${C.amber}, #16696F)`, color: C.cream }}>
               {creating ? "Criar senha e entrar" : "Entrar"}
             </button>
+            {!creating && (
+              <button
+                onClick={() => { const nm2 = student.name; setView(null); setLoginMode(true); setRecMode(true); setRcName(nm2); setRcPhone(""); setRcPass(""); setRcErr(""); setRcStep(1); }}
+                className="block w-full text-center mt-3"
+                style={{ color: C.oak, fontSize: 12.5, textDecoration: "underline", textUnderlineOffset: 3, background: "transparent", border: "none" }}
+              >
+                🔑 Esqueci minha senha
+              </button>
+            )}
           </section>
           {footerNote}
           <div className="flex justify-center pb-8">{helpBtn}</div>
@@ -2440,6 +2666,49 @@ export default function App() {
           );
         })()}
 
+        {!admin && !student.phone && (
+          <div className="rounded-xl p-3 mb-3" style={{ background: C.panel, border: `1.5px solid ${C.oak}`, boxShadow: `0 0 12px ${C.oak}33` }}>
+            <div style={{ color: C.oak, fontWeight: 800, fontSize: 11.5, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>
+              📱 Complete seu cadastro
+            </div>
+            <div style={{ color: C.cream, fontSize: 12, lineHeight: 1.5, marginBottom: 8 }}>
+              Informe seu WhatsApp — é ele que permite você <b>recuperar sua senha sozinho(a)</b> se esquecer. Só a administração vê.
+            </div>
+            <div className="flex gap-2">
+              <input
+                type="tel"
+                inputMode="numeric"
+                value={fixPhone}
+                onChange={(e) => setFixPhone(e.target.value.replace(/\D/g, "").replace(/^0+/, "").slice(0, 11))}
+                placeholder="18999342345 (DDD + número)"
+                className="flex-1 rounded-lg px-3 py-2 outline-none"
+                style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream }}
+              />
+              <button
+                onClick={() => {
+                  const ph = normPhone(fixPhone);
+                  if (ph.length < 10 || ph.length > 11) { avisar("Digite o WhatsApp com DDD — só números (10 ou 11 dígitos)."); return; }
+                  mutate((d) => { const s2 = d.students.find((x) => x.id === view); if (s2) s2.phone = ph; });
+                  setFixPhone("");
+                }}
+                className="rounded-lg px-4 font-bold"
+                style={{ background: C.amber, color: C.cream, fontSize: 13 }}
+              >
+                Salvar
+              </button>
+            </div>
+          </div>
+        )}
+        {admin && student.phone && (
+          <a
+            href={`https://wa.me/55${normPhone(student.phone)}`}
+            target="_blank" rel="noreferrer"
+            className="inline-block rounded-full px-3 py-1 mb-3"
+            style={{ color: C.amberSoft, fontSize: 12, border: `1px solid ${C.line}`, textDecoration: "none", fontFamily: "'DM Mono', monospace" }}
+          >
+            📱 {fmtPhone(student.phone)} · abrir WhatsApp
+          </a>
+        )}
         <div className="grid grid-cols-3 gap-2">
           {(() => {
             const lineCells = new Set();
@@ -2660,7 +2929,7 @@ export default function App() {
                   const date = e.target.value;
                   setRecErr("");
                   const valid = date && isWeekendDate(date) ? WEEKEND_SLOTS : WEEKDAY_SLOTS;
-                  setForm({ ...form, date, slot: valid.includes(form.slot) ? form.slot : valid[0] });
+                  setForm({ ...form, date, slot: valid.includes(form.slot) ? form.slot : "" });
                 }}
                 className="flex-1 rounded-lg px-3 py-2 outline-none"
                 style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream, colorScheme: "dark" }}
@@ -2669,8 +2938,9 @@ export default function App() {
                 value={form.slot}
                 onChange={(e) => setForm({ ...form, slot: e.target.value })}
                 className="rounded-lg px-3 py-2 outline-none"
-                style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream }}
+                style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: form.slot ? C.cream : C.mut }}
               >
+                <option value="" disabled>— horário —</option>
                 {validSlots.map((s) => <option key={s} value={s}>{s.replace(":", "h")}</option>)}
               </select>
             </div>
@@ -2749,13 +3019,56 @@ export default function App() {
                   border: `1px solid ${g.status === "pending" ? C.amber + "66" : C.line}`,
                 }}>
                   <div className="flex-1 min-w-0">
-                    <div className="truncate" style={{ color: g.status === "ok" ? C.cream : C.amberSoft, fontSize: 13, fontWeight: 700 }}>
-                      {g.name}
-                    </div>
+                    {admin && editG && editG.id === g.id ? (
+                      <input
+                        autoFocus
+                        value={editG.name}
+                        onChange={(e) => setEditG({ ...editG, name: e.target.value })}
+                        onKeyDown={(e) => {
+                          if (e.key !== "Enter") return;
+                          const nm3 = editG.name.trim().replace(/\s+/g, " ");
+                          if (!nm3) return;
+                          const dup3 = data.students.some((s3) => (s3.guests || []).some((x) => x.id !== g.id && norm(x.name) === norm(nm3)));
+                          if (dup3) { avisar("⚠️ Já existe um convidado com esse nome no desafio."); return; }
+                          mutate((d) => { const s3 = d.students.find((x) => x.id === view); const gg = s3 && s3.guests.find((x) => x.id === g.id); if (gg) gg.name = nm3; });
+                          setEditG(null);
+                        }}
+                        className="w-full rounded px-2 py-1 outline-none"
+                        style={{ background: C.panel, border: `1px solid ${C.amber}`, color: C.cream, fontSize: 13 }}
+                      />
+                    ) : (
+                      <div className="truncate" style={{ color: g.status === "ok" ? C.cream : C.amberSoft, fontSize: 13, fontWeight: 700 }}>
+                        {g.name}
+                      </div>
+                    )}
                     <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: C.mut }}>
                       {weekdayBR(g.date)} {fmtBR(g.date)} · {g.slot.replace(":", "h")}
                     </div>
                   </div>
+                  {admin && (editG && editG.id === g.id ? (
+                    <>
+                      <button
+                        onClick={() => {
+                          const nm3 = editG.name.trim().replace(/\s+/g, " ");
+                          if (!nm3) return;
+                          const dup3 = data.students.some((s3) => (s3.guests || []).some((x) => x.id !== g.id && norm(x.name) === norm(nm3)));
+                          if (dup3) { avisar("⚠️ Já existe um convidado com esse nome no desafio."); return; }
+                          mutate((d) => { const s3 = d.students.find((x) => x.id === view); const gg = s3 && s3.guests.find((x) => x.id === g.id); if (gg) gg.name = nm3; });
+                          setEditG(null);
+                        }}
+                        className="shrink-0 rounded px-1.5 py-0.5 font-bold"
+                        style={{ background: C.ok, color: C.bg, fontSize: 11 }}
+                      >✓</button>
+                      <button onClick={() => setEditG(null)} className="shrink-0 rounded px-1.5 py-0.5" style={{ color: C.mut, fontSize: 11, border: `1px solid ${C.line}` }}>✕</button>
+                    </>
+                  ) : (
+                    <button
+                      onClick={() => setEditG({ id: g.id, name: g.name })}
+                      className="shrink-0 rounded px-1"
+                      title="Corrigir nome do convidado"
+                      style={{ background: "transparent", border: "none", fontSize: 13, cursor: "pointer", opacity: 0.75 }}
+                    >✏️</button>
+                  ))}
                   {g.status === "pending" && (
                     <span className="rounded px-1.5 py-0.5 shrink-0" style={{ fontSize: 10, background: C.wineDeep, color: C.amberSoft }}>
                       pendente
@@ -2850,7 +3163,7 @@ export default function App() {
                   const date = e.target.value;
                   setGErr("");
                   const valid = date && isWeekendDate(date) ? WEEKEND_SLOTS : WEEKDAY_SLOTS;
-                  setGform({ ...gform, date, slot: valid.includes(gform.slot) ? gform.slot : valid[0] });
+                  setGform({ ...gform, date, slot: valid.includes(gform.slot) ? gform.slot : "" });
                 }}
                 className="flex-1 rounded-lg px-3 py-2 outline-none"
                 style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream, colorScheme: "dark" }}
@@ -2859,8 +3172,9 @@ export default function App() {
                 value={gform.slot}
                 onChange={(e) => setGform({ ...gform, slot: e.target.value })}
                 className="rounded-lg px-3 py-2 outline-none"
-                style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream }}
+                style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: gform.slot ? C.cream : C.mut }}
               >
+                <option value="" disabled>— horário —</option>
                 {(gform.date && isWeekendDate(gform.date) ? WEEKEND_SLOTS : WEEKDAY_SLOTS).map((s) => (
                   <option key={s} value={s}>{s.replace(":", "h")}</option>
                 ))}
