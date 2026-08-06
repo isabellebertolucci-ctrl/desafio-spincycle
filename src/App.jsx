@@ -695,7 +695,7 @@ export default function App() {
   const [showAllHist, setShowAllHist] = useState(false);
   const [showAllRank, setShowAllRank] = useState(false);
   const [showManual, setShowManual] = useState(false);
-  const [mm, setMm] = useState({ name: "", startDT: dtNowLocal(), durMin: 30, desc: "", prize: "", qty: 1, mode: "manual", slots: [], answersText: "", optionsText: "", correct: "", tries: 3, scope: "todos", openMode: "fila", aulaDate: todayStr(), aulaSlot: "" });
+  const [mm, setMm] = useState({ name: "", startDT: dtNowLocal(), durMin: 30, desc: "", prize: "", qty: 1, mode: "manual", slots: [], answersText: "", optionsText: "", correct: "", tries: 3, scope: "todos", openMode: "fila", aulaDate: todayStr(), aulaSlot: "", grupo: "ilimitado" });
   const [qzAns, setQzAns] = useState({});
   const [qzMsg, setQzMsg] = useState({});
   const [mmMsg, setMmMsg] = useState("");
@@ -727,6 +727,8 @@ export default function App() {
   const [miniPage, setMiniPage] = useState(null);
   const [photos, setPhotos] = useState({});
   const [showPerfil, setShowPerfil] = useState(false);
+  const [rankQ, setRankQ] = useState("");
+  const [showMM, setShowMM] = useState(false);
   const bootView = useRef(false);
   const [obsDraft, setObsDraft] = useState("");
   const [allData, setAllData] = useState({});
@@ -819,6 +821,10 @@ export default function App() {
         try { out[t.id] = await loadData(t.id); } catch { out[t.id] = null; }
       }
       if (alive) setAllData(out);
+      try {
+        const g = await loadGlobal();
+        if (alive) setGData(g);
+      } catch { /* mantém */ }
     };
     loadAll();
     const iv = setInterval(loadAll, 30000);
@@ -1298,6 +1304,324 @@ export default function App() {
     );
   }
 
+  // ---------- Missões Relâmpago (criação e gestão) ----------
+  if (showMM && admin) {
+    const doMiniAt = (x, tid) => ((x.scope === "todos" || x.scope === "aula") ? mutateGlobal : (fn) => mutateTrack(tid, fn));
+    return (
+      <div className="min-h-screen" style={{ ...pageVars, background: pageBg, fontFamily: "'Montserrat', sans-serif", transition: "background .4s" }}>
+        {fonts}{modal}
+        <main className="max-w-md mx-auto px-5 pb-16 pt-6">
+          <div className="flex items-center justify-between">
+            <button onClick={() => setShowMM(false)} style={{ color: C.oak, fontSize: 13 }}>← Voltar</button>
+            {lockBtn}
+          </div>
+          <h2 className="mt-4 mb-1" style={{ fontWeight: 800, fontSize: 22, color: C.amber, textTransform: "uppercase", letterSpacing: "0.03em" }}>
+            ⚡ Missões Relâmpago
+          </h2>
+          <div style={{ color: C.mut, fontSize: 12, marginBottom: 12 }}>
+            Crie, acompanhe, apure e encerre — tudo aqui, para qualquer grupo.
+          </div>
+
+            <section className="rounded-xl p-4 mt-6" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+              <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, letterSpacing: "0.25em", color: C.oak, textTransform: "uppercase", marginBottom: 10 }}>
+                ⚡ Missões relâmpago (administração)
+              </div>
+              <div className="flex flex-col gap-2">
+                <input value={mm.name} onChange={(e) => setMm({ ...mm, name: e.target.value })} placeholder="Nome da missão (ex.: Story na Bike)"
+                  className="rounded-lg px-3 py-2 outline-none" style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream }} />
+                <div className="flex items-center gap-2">
+                  <span className="shrink-0" style={{ color: C.mut, fontSize: 12, width: 96 }}>Começa em</span>
+                  <input type="datetime-local" value={mm.startDT}
+                    onChange={(e) => setMm({ ...mm, startDT: e.target.value })}
+                    className="flex-1 rounded-lg px-3 py-2 outline-none" style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream, colorScheme: "dark" }} />
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="shrink-0" style={{ color: C.mut, fontSize: 12, width: 96 }}>Dura (minutos)</span>
+                  <input type="number" min="1" max="20160" value={mm.durMin}
+                    onChange={(e) => setMm({ ...mm, durMin: Math.max(1, parseInt(e.target.value || "1", 10)) })}
+                    className="flex-1 rounded-lg px-3 py-2 outline-none" style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream }} />
+                  <span className="shrink-0" style={{ color: C.mut, fontSize: 11 }}>
+                    {mm.durMin >= 1440 ? `${Math.round(mm.durMin / 1440)} dia(s)` : mm.durMin >= 60 ? `${Math.floor(mm.durMin / 60)}h${mm.durMin % 60 ? String(mm.durMin % 60).padStart(2, "0") : ""}` : ""}
+                  </span>
+                </div>
+                <input value={mm.desc} onChange={(e) => setMm({ ...mm, desc: e.target.value })} placeholder="Explicação breve (o que o aluno precisa fazer)"
+                  className="rounded-lg px-3 py-2 outline-none" style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream }} />
+                <select value={mm.mode} onChange={(e) => setMm({ ...mm, mode: e.target.value })}
+                  className="rounded-lg px-3 py-2 outline-none" style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream }}>
+                  <option value="manual">🖐 Premiação manual (eu escolho os vencedores)</option>
+                  <option value="top">📈 Automática: quem fizer MAIS check-ins no período</option>
+                  <option value="slot">⏰ Automática: check-in em horário(s) que eu definir</option>
+                  <option value="sorteio">🎲 Sorteio entre quem treinar no período</option>
+                  <option value="quizText">✍️ Quiz — a pessoa digita a resposta</option>
+                  <option value="quizChoice">❓ Quiz — lista suspensa de opções</option>
+                </select>
+                <select value={mm.scope} onChange={(e) => setMm({ ...mm, scope: e.target.value })}
+                  className="rounded-lg px-3 py-2 outline-none" style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream }}>
+                  <option value="todos">🌍 Todos os participantes — um pódio só</option>
+                  <option value="grupos">🥇 1 prêmio para cada grupo (Ilimitados, Pacotes e Híbridos)</option>
+                  <option value="aula">🚴 Só quem fez check-in em uma aula que eu escolher</option>
+                  <option value="um">🎯 Só para um grupo específico</option>
+                </select>
+                {mm.scope === "um" && (
+                  <select value={mm.grupo} onChange={(e) => setMm({ ...mm, grupo: e.target.value })}
+                    className="rounded-lg px-3 py-2 outline-none" style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream }}>
+                    {TRACKS.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+                  </select>
+                )}
+                {mm.scope === "aula" && (
+                  <div className="flex gap-2">
+                    <input type="date" value={mm.aulaDate} min={DESAFIO_INICIO} max="2026-09-20"
+                      onChange={(e) => {
+                        const nd = e.target.value;
+                        const vs = nd && isWeekendDate(nd) ? WEEKEND_SLOTS : WEEKDAY_SLOTS;
+                        setMm({ ...mm, aulaDate: nd, aulaSlot: vs.includes(mm.aulaSlot) ? mm.aulaSlot : "" });
+                      }}
+                      className="flex-1 rounded-lg px-3 py-2 outline-none" style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream, colorScheme: "dark" }} />
+                    <select value={mm.aulaSlot} onChange={(e) => setMm({ ...mm, aulaSlot: e.target.value })}
+                      className="rounded-lg px-3 py-2 outline-none" style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: mm.aulaSlot ? C.cream : C.mut }}>
+                      <option value="" disabled>— aula —</option>
+                      {(mm.aulaDate && isWeekendDate(mm.aulaDate) ? WEEKEND_SLOTS : WEEKDAY_SLOTS).map((sl) => (
+                        <option key={sl} value={sl}>{sl.replace(":", "h")}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                <select value={mm.openMode} onChange={(e) => setMm({ ...mm, openMode: e.target.value })}
+                  className="rounded-lg px-3 py-2 outline-none" style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream }}>
+                  <option value="fila">🏁 Fecha assim que os prêmios acabarem</option>
+                  <option value="tempo">⏱️ Aberta até o fim do tempo — todos respondem, resultado sai no final</option>
+                </select>
+                {mm.mode === "slot" && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {[...WEEKDAY_SLOTS, ...WEEKEND_SLOTS].map((sl) => {
+                      const on = mm.slots.includes(sl);
+                      return (
+                        <button key={sl}
+                          onClick={() => setMm({ ...mm, slots: on ? mm.slots.filter((x) => x !== sl) : [...mm.slots, sl] })}
+                          className="rounded-full px-2.5 py-1"
+                          style={{ fontSize: 11, fontFamily: "'DM Mono', monospace", background: on ? C.amber : C.panelSoft, color: on ? C.cream : C.mut, border: `1px solid ${on ? C.amber : C.line}` }}>
+                          {sl.replace(":", "h")}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                {(mm.mode === "quizText" || mm.mode === "quizChoice") && (
+                  <>
+                    {mm.mode === "quizText" && (
+                      <input value={mm.answersText} onChange={(e) => setMm({ ...mm, answersText: e.target.value })}
+                        placeholder="Respostas aceitas, separadas por vírgula (ex.: Vamos time, Vamo time, Vamosss timeee)"
+                        className="rounded-lg px-3 py-2 outline-none" style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream }} />
+                    )}
+                    {mm.mode === "quizChoice" && (
+                      <>
+                        <input value={mm.optionsText} onChange={(e) => setMm({ ...mm, optionsText: e.target.value, correct: "" })}
+                          placeholder="Opções separadas por vírgula (ex.: Trança, Tiara, Cabelo rosa)"
+                          className="rounded-lg px-3 py-2 outline-none" style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream }} />
+                        <select value={mm.correct} onChange={(e) => setMm({ ...mm, correct: e.target.value })}
+                          className="rounded-lg px-3 py-2 outline-none" style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: mm.correct ? C.cream : C.mut }}>
+                          <option value="" disabled>Qual é a resposta correta?</option>
+                          {mm.optionsText.split(",").map((o) => o.trim()).filter(Boolean).map((o) => <option key={o} value={o}>{o}</option>)}
+                        </select>
+                      </>
+                    )}
+                    <div className="flex items-center gap-2">
+                      <span style={{ color: C.mut, fontSize: 12 }}>Tentativas por aluno:</span>
+                      <input type="number" min="1" max="20" value={mm.tries}
+                        onChange={(e) => setMm({ ...mm, tries: Math.max(1, parseInt(e.target.value || "1", 10)) })}
+                        className="rounded-lg px-3 py-1.5 outline-none" style={{ width: 70, background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream }} />
+                    </div>
+                  </>
+                )}
+                <div className="flex gap-2">
+                  <input value={mm.prize} onChange={(e) => setMm({ ...mm, prize: e.target.value })} placeholder="Prêmio (ex.: CAMISETA)"
+                    className="flex-1 rounded-lg px-3 py-2 outline-none" style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream }} />
+                  <input type="number" min="1" max="99" value={mm.qty}
+                    onChange={(e) => setMm({ ...mm, qty: Math.max(1, parseInt(e.target.value || "1", 10)) })}
+                    className="rounded-lg px-3 py-2 outline-none" style={{ width: 76, background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream }} />
+                </div>
+                <button
+                  onClick={() => {
+                    if (!mm.name.trim() || !mm.desc.trim() || !mm.prize.trim()) { setMmMsg("Preencha nome, explicação e prêmio."); return; }
+                    if (mm.mode === "slot" && !mm.slots.length) { setMmMsg("Escolha ao menos 1 horário para essa missão."); return; }
+                    const startTs = Date.parse(mm.startDT);
+                    if (!startTs) { setMmMsg("Escolha a data e a hora de início."); return; }
+                    if (mm.scope === "aula" && !mm.aulaSlot) { setMmMsg("Escolha a aula (dia e horário) que dá acesso à missão."); return; }
+                    const endTs = startTs + mm.durMin * 60000;
+                    const answers = mm.answersText.split(",").map((a) => a.trim()).filter(Boolean);
+                    const options = mm.optionsText.split(",").map((o) => o.trim()).filter(Boolean);
+                    if (mm.mode === "quizText" && !answers.length) { setMmMsg("Informe ao menos 1 resposta aceita."); return; }
+                    if (mm.mode === "quizChoice" && (options.length < 2 || !mm.correct)) { setMmMsg("Informe 2+ opções e marque a correta."); return; }
+                    const nova = {
+                      id: Date.now().toString(36),
+                      name: mm.name.trim(), desc: mm.desc.trim(), prize: mm.prize.trim(),
+                      qty: mm.qty, startTs, endTs, start: isoDateOf(startTs), end: isoDateOf(endTs),
+                      mode: mm.mode, slots: mm.slots, winners: [], log: [],
+                      openMode: mm.openMode, aulaDate: mm.aulaDate, aulaSlot: mm.aulaSlot,
+                      answers, options, correct: mm.correct, tries: mm.tries, attempts: {},
+                    };
+                    nova.scope = mm.scope;
+                    if (mm.scope === "todos" || mm.scope === "aula") {
+                      mutateGlobal((d) => { if (!d.miniMissions) d.miniMissions = []; d.miniMissions.push(nova); });
+                    } else if (mm.scope === "grupos") {
+                      TRACKS.forEach((t) => mutateTrack(t.id, (d) => {
+                        if (!d.miniMissions) d.miniMissions = [];
+                        d.miniMissions.push(JSON.parse(JSON.stringify(nova)));
+                      }));
+                    } else {
+                      mutateTrack(mm.grupo, (d) => { if (!d.miniMissions) d.miniMissions = []; d.miniMissions.push(nova); });
+                    }
+                    setMm({ name: "", startDT: dtNowLocal(), durMin: 30, desc: "", prize: "", qty: 1, mode: "manual", slots: [], answersText: "", optionsText: "", correct: "", tries: 3, scope: "todos", openMode: "fila", aulaDate: todayStr(), aulaSlot: "", grupo: "ilimitado" });
+                    setMmMsg(
+                      mm.scope === "todos" ? "⚡🌍 Missão criada para TODOS — um pódio só!"
+                      : mm.scope === "grupos" ? "⚡🥇 Missão criada nos 3 grupos — 1 pódio por grupo!"
+                      : mm.scope === "aula" ? `⚡🚴 Missão criada só para a aula de ${fmtBR(mm.aulaDate)} às ${mm.aulaSlot.replace(":", "h")}!`
+                      : `⚡ Missão criada só para ${(TRACKS.find((t) => t.id === mm.grupo) || {}).short}!`
+                    );
+                    setTimeout(() => setMmMsg(""), 3500);
+                  }}
+                  className="rounded-lg py-2.5 font-bold" style={{ background: `linear-gradient(120deg, ${C.amber}, #16696F)`, color: C.cream }}>
+                  Criar missão
+                </button>
+                {mmMsg && <div className="text-center" style={{ color: C.amberSoft, fontSize: 12 }}>{mmMsg}</div>}
+              </div>
+
+              {[
+                ...((gData.miniMissions || []).map((x) => ({ x, tid: null }))),
+                ...TRACKS.flatMap((t) => ((((allData[t.id] || {}).miniMissions) || []).map((x) => ({ x, tid: t.id })))),
+              ]
+                .sort((a, b) => (a.x.id < b.x.id ? 1 : -1))
+                .map(({ x, tid }) => {
+                const fase = mmPhase(x, Date.now());
+                const ativa = fase === "ativa";
+                const naAula = (s) => (s.records || []).some((r) => r.status === "ok" && r.date === x.aulaDate && r.slot === x.aulaSlot);
+                const baseTodos = x.scope === "todos" || x.scope === "aula";
+                let base = baseTodos ? alunosDeTodos() : (((allData[tid] || {}).students) || []);
+                if (x.scope === "aula") base = base.filter(naAula);
+                const dx = baseTodos
+                  ? { students: x.scope === "aula" ? base : alunosDeTodos() }
+                  : { students: ((allData[tid] || {}).students) || [] };
+                const candidatos = base.filter((s) => s.approved !== false && !(x.winners || []).some((w) => w.id === s.id))
+                  .sort((a, b) => a.name.localeCompare(b.name));
+                return (
+                  <div key={x.id} className="rounded-lg p-3 mt-3" style={{ background: C.panelSoft, border: `1px solid ${ativa ? C.amber + "88" : C.line}` }}>
+                    <div className="flex items-center justify-between gap-2">
+                      <div style={{ color: C.cream, fontWeight: 800, fontSize: 13 }}>⚡ {x.scope === "todos" ? "🌍 " : x.scope === "grupos" ? "🥇 " : x.scope === "aula" ? "🚴 " : ""}{x.name}{tid ? <span style={{ color: C.mut, fontWeight: 500, fontSize: 10, textTransform: "none" }}> · {(TRACKS.find((t) => t.id === tid) || {}).short}</span> : null}</div>
+                      <div style={{ color: fase === "ativa" ? C.amberSoft : fase === "agendada" ? C.oak : C.mut, fontSize: 11 }}>
+                        {fase === "agendada" ? `⏳ começa ${fmtDT(mmStartTs(x))}`
+                          : fase === "ativa" ? `⏱️ até ${fmtDT(mmEndTs(x))}`
+                          : fase === "resultado" ? "🏁 resultado no ar"
+                          : "encerrada"}
+                      </div>
+                    </div>
+                    <div style={{ color: C.mut, fontSize: 12, marginTop: 2 }}>
+                      {x.desc} · 🏆 {x.prize} ({(x.winners || []).length}/{x.qty})
+                      {x.scope === "aula" && x.aulaDate ? ` · 🚴 aula de ${fmtBR(x.aulaDate)} ${String(x.aulaSlot || "").replace(":", "h")}` : ""}
+                      {x.openMode === "tempo" ? " · ⏱️ aberta até o fim do tempo" : ""}
+                    </div>
+                    {x.mode === "quizText" && (
+                      <div style={{ color: C.oak, fontSize: 11, marginTop: 2 }}>
+                        ✍️ aceita: {(x.answers || []).join(" | ")} · {x.tries || 3} tentativa{(x.tries || 3) === 1 ? "" : "s"} · {Object.keys(x.attempts || {}).length} responderam
+                      </div>
+                    )}
+                    {x.mode === "quizChoice" && (
+                      <div style={{ color: C.oak, fontSize: 11, marginTop: 2 }}>
+                        ❓ opções: {(x.options || []).map((o) => (o === x.correct ? `✔${o}` : o)).join(" | ")} · {x.tries || 3} tentativa{(x.tries || 3) === 1 ? "" : "s"} · {Object.keys(x.attempts || {}).length} responderam
+                      </div>
+                    )}
+                    {(x.winners || []).length > 0 && (
+                      <div style={{ color: C.amberSoft, fontSize: 11.5, marginTop: 4 }}>
+                        {(x.winners || []).map((w, i) => `${i + 1}º ${w.name}`).join(" · ")}
+                      </div>
+                    )}
+                    {ativa && (x.mode === "top" || x.mode === "slot" || x.mode === "sorteio") && (() => {
+                      const faltam = x.qty - (x.winners || []).length;
+                      const parcial = x.mode === "top" ? miniTop(dx, x).slice(0, x.qty)
+                        : x.mode === "slot" ? miniSlotFirsts(dx, x).slice(0, x.qty)
+                        : miniElegiveis(dx, x);
+                      const apurar = () => {
+                        doMiniAt(x, tid)((d) => {
+                          const xx = (d.miniMissions || []).find((y) => y.id === x.id);
+                          if (!xx) return;
+                          if (!xx.winners) xx.winners = [];
+                          const ja = new Set(xx.winners.map((w) => w.id));
+                          const fonte = xx.scope === "todos" ? dx : d;
+                          let lista = [];
+                          if (xx.mode === "top") lista = miniTop(fonte, xx);
+                          else if (xx.mode === "slot") lista = miniSlotFirsts(fonte, xx);
+                          else {
+                            const el = miniElegiveis(fonte, xx).filter((s) => !ja.has(s.id));
+                            for (let i = el.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [el[i], el[j]] = [el[j], el[i]]; }
+                            lista = el;
+                          }
+                          lista.filter((w) => !ja.has(w.id)).slice(0, xx.qty - xx.winners.length)
+                            .forEach((w) => xx.winners.push({ id: w.id, name: w.name, ts: Date.now() }));
+                        });
+                      };
+                      return (
+                        <div className="mt-2">
+                          {x.mode !== "sorteio" && parcial.length > 0 && (
+                            <div style={{ color: C.mut, fontSize: 11.5, marginBottom: 4 }}>
+                              parcial: {parcial.map((w, i) => `${i + 1}º ${w.name}${x.mode === "top" ? ` (${w.count})` : ""}`).join(" · ")}
+                            </div>
+                          )}
+                          {x.mode === "sorteio" && (
+                            <div style={{ color: C.mut, fontSize: 11.5, marginBottom: 4 }}>
+                              {parcial.length} participante{parcial.length === 1 ? "" : "s"} elegível{parcial.length === 1 ? "" : "eis"} (com aula no período)
+                            </div>
+                          )}
+                          <button onClick={apurar} className="w-full rounded-lg py-2 font-bold" style={{ background: C.amber, color: C.cream, fontSize: 12 }}>
+                            {x.mode === "sorteio" ? `🎲 Sortear ${faltam} vencedor${faltam === 1 ? "" : "es"} agora` : `🏁 Apurar vencedores automaticamente`}
+                          </button>
+                        </div>
+                      );
+                    })()}
+                    {ativa && x.mode !== "top" && x.mode !== "slot" && x.mode !== "sorteio" && (
+                      <div className="flex gap-2 mt-2">
+                        <select value={miniAward[x.id] || ""} onChange={(e) => setMiniAward({ ...miniAward, [x.id]: e.target.value })}
+                          className="flex-1 rounded-lg px-2 py-1.5 outline-none" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.cream, fontSize: 12 }}>
+                          <option value="" disabled>Premiar aluno…</option>
+                          {candidatos.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                        </select>
+                        <button
+                          onClick={() => {
+                            const sid = miniAward[x.id];
+                            if (!sid) return;
+                            const cand = candidatos.find((y) => y.id === sid);
+                            if (!cand) return;
+                            doMiniAt(x, tid)((d) => {
+                              const xx = (d.miniMissions || []).find((y) => y.id === x.id);
+                              if (!xx) return;
+                              if (!xx.winners) xx.winners = [];
+                              if (xx.winners.length >= xx.qty || xx.winners.some((w) => w.id === sid)) return;
+                              xx.winners.push({ id: cand.id, name: cand.name, ts: Date.now() });
+                            });
+                            setMiniAward({ ...miniAward, [x.id]: "" });
+                          }}
+                          className="rounded-lg px-3 font-bold" style={{ background: C.amber, color: C.cream, fontSize: 12 }}>
+                          Premiar
+                        </button>
+                      </div>
+                    )}
+                    {ativa && (
+                      <button
+                        onClick={() => doMiniAt(x, tid)((d) => { const xx = (d.miniMissions || []).find((y) => y.id === x.id); if (xx) { xx.endTs = Date.now() - 1000; xx.end = "2000-01-01"; } })}
+                        className="mt-2 rounded-lg px-2 py-1" title="Encerrar missão" style={{ border: `1px solid ${C.line}`, color: C.mut, fontSize: 11 }}>
+                        ✕ Encerrar missão sem premiar o restante
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </section>
+          
+          {footerNote}
+          <div className="flex justify-center pb-8">{helpBtn}</div>
+        </main>
+      </div>
+    );
+  }
+
   // ---------- Cadastros (administração) ----------
   if (showCad && admin) {
     const rows = [];
@@ -1611,6 +1935,15 @@ export default function App() {
               style={{ background: C.panel, color: C.amberSoft, fontSize: 13, border: `1px solid ${C.line}` }}
             >
               👥 CADASTROS · {TRACKS.reduce((n, t) => n + ((allData[t.id] || {}).students || []).length, 0)} → ver e editar todos
+            </button>
+          )}
+          {admin && (
+            <button
+              onClick={() => { setShowMM(true); window.scrollTo({ top: 0 }); }}
+              className="w-full rounded-lg px-3 py-2.5 mt-2 text-center font-bold"
+              style={{ background: C.panel, color: C.amberSoft, fontSize: 13, border: `1px solid ${C.amber}66` }}
+            >
+              ⚡ MISSÕES RELÂMPAGO → criar e gerenciar
             </button>
           )}
           {footerNote}
@@ -2421,7 +2754,8 @@ export default function App() {
         const feito = MISSIONS.reduce((n, m) => n + Math.min(r.p[m.id], m.target), 0);
         return { s, r, feito };
       })
-      .sort((a, b) => b.feito - a.feito || b.r.doneCount - a.r.doneCount || b.r.p.maratona - a.r.p.maratona || a.s.name.localeCompare(b.s.name));
+      .sort((a, b) => b.feito - a.feito || b.r.doneCount - a.r.doneCount || b.r.p.maratona - a.r.p.maratona || a.s.name.localeCompare(b.s.name))
+      .map((e, idx) => ({ ...e, pos: idx }));
     const totalPending = ranked.reduce((n, x) => n + x.r.pending, 0);
 
     return (
@@ -2462,8 +2796,18 @@ export default function App() {
             Toque em ENTRAR NAS MISSÕES, no topo, para registrar suas aulas — e acompanhe o ranking do desafio abaixo.
           </p>
 
+          <input
+            value={rankQ}
+            onChange={(e) => setRankQ(e.target.value)}
+            placeholder="🔍 Buscar aluno no ranking…"
+            className="w-full rounded-lg px-4 py-2.5 outline-none mb-2"
+            style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.cream, fontSize: 13 }}
+          />
           <div className="flex flex-col gap-2">
-            {(showAllRank ? ranked : ranked.slice(0, 5)).map(({ s, r }, i) => (
+            {(rankQ.trim()
+              ? ranked.filter(({ s }) => norm(s.name).includes(norm(rankQ)))
+              : (showAllRank ? ranked : ranked.slice(0, 5))
+            ).map(({ s, r, pos }) => (
               <button
                 key={s.id}
                 onClick={() => {
@@ -2476,11 +2820,11 @@ export default function App() {
                 style={{ background: C.panel, border: `1px solid ${r.full ? C.amber : C.line}`, cursor: "pointer" }}
               >
                 {(() => {
-                  const medal = r.doneCount > 0 && i < 3 ? [
+                  const medal = r.doneCount > 0 && pos < 3 ? [
                     { bg: "linear-gradient(135deg, #E8C169, #B08D3E)", bd: "#F2D98C", glow: "#D9A95466" },
                     { bg: "linear-gradient(135deg, #D7DBE0, #9FA6AD)", bd: "#E8ECF0", glow: "#C0C4C955" },
                     { bg: "linear-gradient(135deg, #C98F5A, #8E5F33)", bd: "#DFA877", glow: "#B07A4A55" },
-                  ][i] : null;
+                  ][pos] : null;
                   const foto = photos[s.id];
                   return (
                     <div className="relative shrink-0" style={{ width: 38, height: 38 }}>
@@ -2492,7 +2836,7 @@ export default function App() {
                         boxShadow: medal ? `0 0 10px ${medal.glow}` : "none",
                         fontFamily: "'DM Mono', monospace", fontSize: 13, fontWeight: 500,
                       }}>
-                        {foto ? <img src={foto} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : (i + 1)}
+                        {foto ? <img src={foto} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : (pos + 1)}
                       </div>
                       {foto && (
                         <div className="absolute flex items-center justify-center rounded-full" style={{
@@ -2502,7 +2846,7 @@ export default function App() {
                           border: medal ? `1.5px solid ${medal.bd}` : `1px solid ${C.line}`,
                           fontFamily: "'DM Mono', monospace", fontSize: 9.5, fontWeight: 700,
                         }}>
-                          {i + 1}
+                          {pos + 1}
                         </div>
                       )}
                     </div>
@@ -2584,290 +2928,6 @@ export default function App() {
               </div>
             );
           })()}
-
-          {admin && (
-            <section className="rounded-xl p-4 mt-6" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
-              <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, letterSpacing: "0.25em", color: C.oak, textTransform: "uppercase", marginBottom: 10 }}>
-                ⚡ Missões relâmpago (administração)
-              </div>
-              <div className="flex flex-col gap-2">
-                <input value={mm.name} onChange={(e) => setMm({ ...mm, name: e.target.value })} placeholder="Nome da missão (ex.: Story na Bike)"
-                  className="rounded-lg px-3 py-2 outline-none" style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream }} />
-                <div className="flex items-center gap-2">
-                  <span className="shrink-0" style={{ color: C.mut, fontSize: 12, width: 96 }}>Começa em</span>
-                  <input type="datetime-local" value={mm.startDT}
-                    onChange={(e) => setMm({ ...mm, startDT: e.target.value })}
-                    className="flex-1 rounded-lg px-3 py-2 outline-none" style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream, colorScheme: "dark" }} />
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="shrink-0" style={{ color: C.mut, fontSize: 12, width: 96 }}>Dura (minutos)</span>
-                  <input type="number" min="1" max="20160" value={mm.durMin}
-                    onChange={(e) => setMm({ ...mm, durMin: Math.max(1, parseInt(e.target.value || "1", 10)) })}
-                    className="flex-1 rounded-lg px-3 py-2 outline-none" style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream }} />
-                  <span className="shrink-0" style={{ color: C.mut, fontSize: 11 }}>
-                    {mm.durMin >= 1440 ? `${Math.round(mm.durMin / 1440)} dia(s)` : mm.durMin >= 60 ? `${Math.floor(mm.durMin / 60)}h${mm.durMin % 60 ? String(mm.durMin % 60).padStart(2, "0") : ""}` : ""}
-                  </span>
-                </div>
-                <input value={mm.desc} onChange={(e) => setMm({ ...mm, desc: e.target.value })} placeholder="Explicação breve (o que o aluno precisa fazer)"
-                  className="rounded-lg px-3 py-2 outline-none" style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream }} />
-                <select value={mm.mode} onChange={(e) => setMm({ ...mm, mode: e.target.value })}
-                  className="rounded-lg px-3 py-2 outline-none" style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream }}>
-                  <option value="manual">🖐 Premiação manual (eu escolho os vencedores)</option>
-                  <option value="top">📈 Automática: quem fizer MAIS check-ins no período</option>
-                  <option value="slot">⏰ Automática: check-in em horário(s) que eu definir</option>
-                  <option value="sorteio">🎲 Sorteio entre quem treinar no período</option>
-                  <option value="quizText">✍️ Quiz — a pessoa digita a resposta</option>
-                  <option value="quizChoice">❓ Quiz — lista suspensa de opções</option>
-                </select>
-                <select value={mm.scope} onChange={(e) => setMm({ ...mm, scope: e.target.value })}
-                  className="rounded-lg px-3 py-2 outline-none" style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream }}>
-                  <option value="todos">🌍 Todos os participantes — um pódio só</option>
-                  <option value="grupos">🥇 1 prêmio para cada grupo (Ilimitados, Pacotes e Híbridos)</option>
-                  <option value="aula">🚴 Só quem fez check-in em uma aula que eu escolher</option>
-                  <option value="este">🎯 Só para este desafio ({(TRACKS.find((t) => t.id === track) || {}).short})</option>
-                </select>
-                {mm.scope === "aula" && (
-                  <div className="flex gap-2">
-                    <input type="date" value={mm.aulaDate} min={DESAFIO_INICIO} max="2026-09-20"
-                      onChange={(e) => {
-                        const nd = e.target.value;
-                        const vs = nd && isWeekendDate(nd) ? WEEKEND_SLOTS : WEEKDAY_SLOTS;
-                        setMm({ ...mm, aulaDate: nd, aulaSlot: vs.includes(mm.aulaSlot) ? mm.aulaSlot : "" });
-                      }}
-                      className="flex-1 rounded-lg px-3 py-2 outline-none" style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream, colorScheme: "dark" }} />
-                    <select value={mm.aulaSlot} onChange={(e) => setMm({ ...mm, aulaSlot: e.target.value })}
-                      className="rounded-lg px-3 py-2 outline-none" style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: mm.aulaSlot ? C.cream : C.mut }}>
-                      <option value="" disabled>— aula —</option>
-                      {(mm.aulaDate && isWeekendDate(mm.aulaDate) ? WEEKEND_SLOTS : WEEKDAY_SLOTS).map((sl) => (
-                        <option key={sl} value={sl}>{sl.replace(":", "h")}</option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-                <select value={mm.openMode} onChange={(e) => setMm({ ...mm, openMode: e.target.value })}
-                  className="rounded-lg px-3 py-2 outline-none" style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream }}>
-                  <option value="fila">🏁 Fecha assim que os prêmios acabarem</option>
-                  <option value="tempo">⏱️ Aberta até o fim do tempo — todos respondem, resultado sai no final</option>
-                </select>
-                {mm.mode === "slot" && (
-                  <div className="flex flex-wrap gap-1.5">
-                    {[...WEEKDAY_SLOTS, ...WEEKEND_SLOTS].map((sl) => {
-                      const on = mm.slots.includes(sl);
-                      return (
-                        <button key={sl}
-                          onClick={() => setMm({ ...mm, slots: on ? mm.slots.filter((x) => x !== sl) : [...mm.slots, sl] })}
-                          className="rounded-full px-2.5 py-1"
-                          style={{ fontSize: 11, fontFamily: "'DM Mono', monospace", background: on ? C.amber : C.panelSoft, color: on ? C.cream : C.mut, border: `1px solid ${on ? C.amber : C.line}` }}>
-                          {sl.replace(":", "h")}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-                {(mm.mode === "quizText" || mm.mode === "quizChoice") && (
-                  <>
-                    {mm.mode === "quizText" && (
-                      <input value={mm.answersText} onChange={(e) => setMm({ ...mm, answersText: e.target.value })}
-                        placeholder="Respostas aceitas, separadas por vírgula (ex.: Vamos time, Vamo time, Vamosss timeee)"
-                        className="rounded-lg px-3 py-2 outline-none" style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream }} />
-                    )}
-                    {mm.mode === "quizChoice" && (
-                      <>
-                        <input value={mm.optionsText} onChange={(e) => setMm({ ...mm, optionsText: e.target.value, correct: "" })}
-                          placeholder="Opções separadas por vírgula (ex.: Trança, Tiara, Cabelo rosa)"
-                          className="rounded-lg px-3 py-2 outline-none" style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream }} />
-                        <select value={mm.correct} onChange={(e) => setMm({ ...mm, correct: e.target.value })}
-                          className="rounded-lg px-3 py-2 outline-none" style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: mm.correct ? C.cream : C.mut }}>
-                          <option value="" disabled>Qual é a resposta correta?</option>
-                          {mm.optionsText.split(",").map((o) => o.trim()).filter(Boolean).map((o) => <option key={o} value={o}>{o}</option>)}
-                        </select>
-                      </>
-                    )}
-                    <div className="flex items-center gap-2">
-                      <span style={{ color: C.mut, fontSize: 12 }}>Tentativas por aluno:</span>
-                      <input type="number" min="1" max="20" value={mm.tries}
-                        onChange={(e) => setMm({ ...mm, tries: Math.max(1, parseInt(e.target.value || "1", 10)) })}
-                        className="rounded-lg px-3 py-1.5 outline-none" style={{ width: 70, background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream }} />
-                    </div>
-                  </>
-                )}
-                <div className="flex gap-2">
-                  <input value={mm.prize} onChange={(e) => setMm({ ...mm, prize: e.target.value })} placeholder="Prêmio (ex.: CAMISETA)"
-                    className="flex-1 rounded-lg px-3 py-2 outline-none" style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream }} />
-                  <input type="number" min="1" max="99" value={mm.qty}
-                    onChange={(e) => setMm({ ...mm, qty: Math.max(1, parseInt(e.target.value || "1", 10)) })}
-                    className="rounded-lg px-3 py-2 outline-none" style={{ width: 76, background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream }} />
-                </div>
-                <button
-                  onClick={() => {
-                    if (!mm.name.trim() || !mm.desc.trim() || !mm.prize.trim()) { setMmMsg("Preencha nome, explicação e prêmio."); return; }
-                    if (mm.mode === "slot" && !mm.slots.length) { setMmMsg("Escolha ao menos 1 horário para essa missão."); return; }
-                    const startTs = Date.parse(mm.startDT);
-                    if (!startTs) { setMmMsg("Escolha a data e a hora de início."); return; }
-                    if (mm.scope === "aula" && !mm.aulaSlot) { setMmMsg("Escolha a aula (dia e horário) que dá acesso à missão."); return; }
-                    const endTs = startTs + mm.durMin * 60000;
-                    const answers = mm.answersText.split(",").map((a) => a.trim()).filter(Boolean);
-                    const options = mm.optionsText.split(",").map((o) => o.trim()).filter(Boolean);
-                    if (mm.mode === "quizText" && !answers.length) { setMmMsg("Informe ao menos 1 resposta aceita."); return; }
-                    if (mm.mode === "quizChoice" && (options.length < 2 || !mm.correct)) { setMmMsg("Informe 2+ opções e marque a correta."); return; }
-                    const nova = {
-                      id: Date.now().toString(36),
-                      name: mm.name.trim(), desc: mm.desc.trim(), prize: mm.prize.trim(),
-                      qty: mm.qty, startTs, endTs, start: isoDateOf(startTs), end: isoDateOf(endTs),
-                      mode: mm.mode, slots: mm.slots, winners: [], log: [],
-                      openMode: mm.openMode, aulaDate: mm.aulaDate, aulaSlot: mm.aulaSlot,
-                      answers, options, correct: mm.correct, tries: mm.tries, attempts: {},
-                    };
-                    nova.scope = mm.scope;
-                    if (mm.scope === "todos" || mm.scope === "aula") {
-                      mutateGlobal((d) => { if (!d.miniMissions) d.miniMissions = []; d.miniMissions.push(nova); });
-                    } else if (mm.scope === "grupos") {
-                      TRACKS.forEach((t) => mutateTrack(t.id, (d) => {
-                        if (!d.miniMissions) d.miniMissions = [];
-                        d.miniMissions.push(JSON.parse(JSON.stringify(nova)));
-                      }));
-                    } else {
-                      mutate((d) => { if (!d.miniMissions) d.miniMissions = []; d.miniMissions.push(nova); });
-                    }
-                    setMm({ name: "", startDT: dtNowLocal(), durMin: 30, desc: "", prize: "", qty: 1, mode: "manual", slots: [], answersText: "", optionsText: "", correct: "", tries: 3, scope: "todos", openMode: "fila", aulaDate: todayStr(), aulaSlot: "" });
-                    setMmMsg(
-                      mm.scope === "todos" ? "⚡🌍 Missão criada para TODOS — um pódio só!"
-                      : mm.scope === "grupos" ? "⚡🥇 Missão criada nos 3 grupos — 1 pódio por grupo!"
-                      : mm.scope === "aula" ? `⚡🚴 Missão criada só para a aula de ${fmtBR(mm.aulaDate)} às ${mm.aulaSlot.replace(":", "h")}!`
-                      : "⚡ Missão criada! Já está visível na cartela dos alunos."
-                    );
-                    setTimeout(() => setMmMsg(""), 3500);
-                  }}
-                  className="rounded-lg py-2.5 font-bold" style={{ background: `linear-gradient(120deg, ${C.amber}, #16696F)`, color: C.cream }}>
-                  Criar missão
-                </button>
-                {mmMsg && <div className="text-center" style={{ color: C.amberSoft, fontSize: 12 }}>{mmMsg}</div>}
-              </div>
-
-              {[...(gData.miniMissions || []), ...(data.miniMissions || [])]
-                .sort((a, b) => (a.id < b.id ? 1 : -1))
-                .map((x) => {
-                const fase = mmPhase(x, Date.now());
-                const ativa = fase === "ativa";
-                const naAula = (s) => (s.records || []).some((r) => r.status === "ok" && r.date === x.aulaDate && r.slot === x.aulaSlot);
-                const baseTodos = x.scope === "todos" || x.scope === "aula";
-                let base = baseTodos ? alunosDeTodos() : data.students;
-                if (x.scope === "aula") base = base.filter(naAula);
-                const dx = baseTodos ? { students: x.scope === "aula" ? base : alunosDeTodos() } : data;
-                const candidatos = base.filter((s) => s.approved !== false && !(x.winners || []).some((w) => w.id === s.id))
-                  .sort((a, b) => a.name.localeCompare(b.name));
-                return (
-                  <div key={x.id} className="rounded-lg p-3 mt-3" style={{ background: C.panelSoft, border: `1px solid ${ativa ? C.amber + "88" : C.line}` }}>
-                    <div className="flex items-center justify-between gap-2">
-                      <div style={{ color: C.cream, fontWeight: 800, fontSize: 13 }}>⚡ {x.scope === "todos" ? "🌍 " : x.scope === "grupos" ? "🥇 " : x.scope === "aula" ? "🚴 " : ""}{x.name}</div>
-                      <div style={{ color: fase === "ativa" ? C.amberSoft : fase === "agendada" ? C.oak : C.mut, fontSize: 11 }}>
-                        {fase === "agendada" ? `⏳ começa ${fmtDT(mmStartTs(x))}`
-                          : fase === "ativa" ? `⏱️ até ${fmtDT(mmEndTs(x))}`
-                          : fase === "resultado" ? "🏁 resultado no ar"
-                          : "encerrada"}
-                      </div>
-                    </div>
-                    <div style={{ color: C.mut, fontSize: 12, marginTop: 2 }}>
-                      {x.desc} · 🏆 {x.prize} ({(x.winners || []).length}/{x.qty})
-                      {x.scope === "aula" && x.aulaDate ? ` · 🚴 aula de ${fmtBR(x.aulaDate)} ${String(x.aulaSlot || "").replace(":", "h")}` : ""}
-                      {x.openMode === "tempo" ? " · ⏱️ aberta até o fim do tempo" : ""}
-                    </div>
-                    {x.mode === "quizText" && (
-                      <div style={{ color: C.oak, fontSize: 11, marginTop: 2 }}>
-                        ✍️ aceita: {(x.answers || []).join(" | ")} · {x.tries || 3} tentativa{(x.tries || 3) === 1 ? "" : "s"} · {Object.keys(x.attempts || {}).length} responderam
-                      </div>
-                    )}
-                    {x.mode === "quizChoice" && (
-                      <div style={{ color: C.oak, fontSize: 11, marginTop: 2 }}>
-                        ❓ opções: {(x.options || []).map((o) => (o === x.correct ? `✔${o}` : o)).join(" | ")} · {x.tries || 3} tentativa{(x.tries || 3) === 1 ? "" : "s"} · {Object.keys(x.attempts || {}).length} responderam
-                      </div>
-                    )}
-                    {(x.winners || []).length > 0 && (
-                      <div style={{ color: C.amberSoft, fontSize: 11.5, marginTop: 4 }}>
-                        {(x.winners || []).map((w, i) => `${i + 1}º ${w.name}`).join(" · ")}
-                      </div>
-                    )}
-                    {ativa && (x.mode === "top" || x.mode === "slot" || x.mode === "sorteio") && (() => {
-                      const faltam = x.qty - (x.winners || []).length;
-                      const parcial = x.mode === "top" ? miniTop(dx, x).slice(0, x.qty)
-                        : x.mode === "slot" ? miniSlotFirsts(dx, x).slice(0, x.qty)
-                        : miniElegiveis(dx, x);
-                      const apurar = () => {
-                        doMini(x)((d) => {
-                          const xx = (d.miniMissions || []).find((y) => y.id === x.id);
-                          if (!xx) return;
-                          if (!xx.winners) xx.winners = [];
-                          const ja = new Set(xx.winners.map((w) => w.id));
-                          const fonte = xx.scope === "todos" ? dx : d;
-                          let lista = [];
-                          if (xx.mode === "top") lista = miniTop(fonte, xx);
-                          else if (xx.mode === "slot") lista = miniSlotFirsts(fonte, xx);
-                          else {
-                            const el = miniElegiveis(fonte, xx).filter((s) => !ja.has(s.id));
-                            for (let i = el.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [el[i], el[j]] = [el[j], el[i]]; }
-                            lista = el;
-                          }
-                          lista.filter((w) => !ja.has(w.id)).slice(0, xx.qty - xx.winners.length)
-                            .forEach((w) => xx.winners.push({ id: w.id, name: w.name, ts: Date.now() }));
-                        });
-                      };
-                      return (
-                        <div className="mt-2">
-                          {x.mode !== "sorteio" && parcial.length > 0 && (
-                            <div style={{ color: C.mut, fontSize: 11.5, marginBottom: 4 }}>
-                              parcial: {parcial.map((w, i) => `${i + 1}º ${w.name}${x.mode === "top" ? ` (${w.count})` : ""}`).join(" · ")}
-                            </div>
-                          )}
-                          {x.mode === "sorteio" && (
-                            <div style={{ color: C.mut, fontSize: 11.5, marginBottom: 4 }}>
-                              {parcial.length} participante{parcial.length === 1 ? "" : "s"} elegível{parcial.length === 1 ? "" : "eis"} (com aula no período)
-                            </div>
-                          )}
-                          <button onClick={apurar} className="w-full rounded-lg py-2 font-bold" style={{ background: C.amber, color: C.cream, fontSize: 12 }}>
-                            {x.mode === "sorteio" ? `🎲 Sortear ${faltam} vencedor${faltam === 1 ? "" : "es"} agora` : `🏁 Apurar vencedores automaticamente`}
-                          </button>
-                        </div>
-                      );
-                    })()}
-                    {ativa && x.mode !== "top" && x.mode !== "slot" && x.mode !== "sorteio" && (
-                      <div className="flex gap-2 mt-2">
-                        <select value={miniAward[x.id] || ""} onChange={(e) => setMiniAward({ ...miniAward, [x.id]: e.target.value })}
-                          className="flex-1 rounded-lg px-2 py-1.5 outline-none" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.cream, fontSize: 12 }}>
-                          <option value="" disabled>Premiar aluno…</option>
-                          {candidatos.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                        </select>
-                        <button
-                          onClick={() => {
-                            const sid = miniAward[x.id];
-                            if (!sid) return;
-                            const cand = candidatos.find((y) => y.id === sid);
-                            if (!cand) return;
-                            doMini(x)((d) => {
-                              const xx = (d.miniMissions || []).find((y) => y.id === x.id);
-                              if (!xx) return;
-                              if (!xx.winners) xx.winners = [];
-                              if (xx.winners.length >= xx.qty || xx.winners.some((w) => w.id === sid)) return;
-                              xx.winners.push({ id: cand.id, name: cand.name, ts: Date.now() });
-                            });
-                            setMiniAward({ ...miniAward, [x.id]: "" });
-                          }}
-                          className="rounded-lg px-3 font-bold" style={{ background: C.amber, color: C.cream, fontSize: 12 }}>
-                          Premiar
-                        </button>
-                      </div>
-                    )}
-                    {ativa && (
-                      <button
-                        onClick={() => doMini(x)((d) => { const xx = (d.miniMissions || []).find((y) => y.id === x.id); if (xx) xx.end = "2000-01-01"; })}
-                        className="mt-2 rounded-lg px-2 py-1" title="Encerrar missão" style={{ border: `1px solid ${C.line}`, color: C.mut, fontSize: 11 }}>
-                        ✕ Encerrar missão sem premiar o restante
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </section>
-          )}
 
           {(() => {
             const AW = computeAwards(data);
@@ -3315,9 +3375,6 @@ export default function App() {
               </h2>
             </div>
           )}
-          <div className="shrink-0" style={{ fontFamily: "'DM Mono', monospace", fontSize: 12, color: res.full ? C.amber : C.mut }}>
-            {res.doneCount}/9
-          </div>
         </div>
 
         {!admin && student.pass && unlocks[student.id] === student.pass && (
@@ -3631,6 +3688,11 @@ export default function App() {
             </div>
           );
         })()}
+        <div className="flex justify-end" style={{ marginBottom: 4 }}>
+          <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 12, color: res.full ? C.amber : C.mut }}>
+            {res.doneCount}/9 missões
+          </span>
+        </div>
         <div className="grid grid-cols-3 gap-2">
           {(() => {
             const lineCells = new Set();
