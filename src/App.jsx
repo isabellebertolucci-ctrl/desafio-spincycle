@@ -729,6 +729,9 @@ export default function App() {
   const [showPerfil, setShowPerfil] = useState(false);
   const [rankQ, setRankQ] = useState("");
   const [showMM, setShowMM] = useState(false);
+  const [showRel, setShowRel] = useState(false);
+  const [showWins, setShowWins] = useState(false);
+  const [impRes, setImpRes] = useState(null);
   const bootView = useRef(false);
   const [obsDraft, setObsDraft] = useState("");
   const [allData, setAllData] = useState({});
@@ -1130,8 +1133,8 @@ export default function App() {
     const validarGrupo = (tid) => {
       mutateTrack(tid, (d) => {
         d.students.forEach((s) => {
-          (s.records || []).forEach((r) => { if (r.status === "pending") r.status = "ok"; });
-          (s.guests || []).forEach((g) => { if (g.status === "pending") g.status = "ok"; });
+          (s.records || []).forEach((r) => { if (r.status === "pending" && !r.alert) r.status = "ok"; });
+          (s.guests || []).forEach((g) => { if (g.status === "pending" && !g.alert) g.status = "ok"; });
         });
       });
     };
@@ -1221,11 +1224,20 @@ export default function App() {
                       </button>
                     </div>
                     <div className="flex flex-col gap-1">
-                      {itens.map(({ tipo, s, it }) => {
+                      {(() => {
+                        const porData = {};
+                        itens.forEach((o) => { (porData[o.it.date] = porData[o.it.date] || []).push(o); });
+                        const datas = Object.keys(porData).sort((a, b) => (a < b ? 1 : -1));
+                        return datas.map((dt) => (
+                          <div key={dt} className="flex flex-col gap-1.5">
+                            <div className="mt-1" style={{ fontFamily: "'DM Mono', monospace", fontSize: 10.5, letterSpacing: "0.15em", color: C.oak, textTransform: "uppercase" }}>
+                              📅 {weekdayBR(dt)} {fmtBR(dt)} · {porData[dt].length}
+                            </div>
+                            {porData[dt].map(({ tipo, s, it }) => {
                         const editando = editP && editP.tid === t.id && editP.id === it.id;
                         const slotsEd = editando && editP.date && isWeekendDate(editP.date) ? WEEKEND_SLOTS : WEEKDAY_SLOTS;
                         return (
-                        <div key={it.id} className="rounded-lg px-3 py-2" style={{ background: C.panelSoft, border: `1px solid ${C.amber}55` }}>
+                        <div key={it.id} className="rounded-lg px-3 py-2" style={{ background: C.panelSoft, border: `1px solid ${it.alert ? "#B15560" : C.amber + "55"}` }}>
                           <div className="flex items-center gap-2">
                             <div className="flex-1 min-w-0">
                               <div className="truncate" style={{ color: C.cream, fontWeight: 700, fontSize: 13 }}>{s.name}</div>
@@ -1237,6 +1249,20 @@ export default function App() {
                                 </div>
                               )}
                             </div>
+                            {!editando && (
+                              <button
+                                onClick={() => mutateTrack(t.id, (d) => {
+                                  const s2 = d.students.find((x) => x.id === s.id);
+                                  if (!s2) return;
+                                  const alvo = tipo === "rec"
+                                    ? (s2.records || []).find((x) => x.id === it.id)
+                                    : (s2.guests || []).find((x) => x.id === it.id);
+                                  if (alvo) alvo.alert = !alvo.alert;
+                                })}
+                                className="shrink-0 rounded px-1" title={it.alert ? "Remover sinalização" : "Sinalizar incongruência (não valida, não apaga)"}
+                                style={{ background: it.alert ? "#B15560" : "transparent", border: it.alert ? "none" : `1px solid ${C.line}`, borderRadius: 6, fontSize: 12, cursor: "pointer", padding: "2px 5px" }}
+                              >⚠️</button>
+                            )}
                             {tipo === "rec" && !editando && (
                               <button
                                 onClick={() => setEditP({ tid: t.id, sid: s.id, id: it.id, date: it.date, slot: it.slot, instructor: it.instructor })}
@@ -1290,6 +1316,9 @@ export default function App() {
                         </div>
                         );
                       })}
+                          </div>
+                        ));
+                      })()}
                     </div>
                   </div>
                 )}
@@ -1297,6 +1326,423 @@ export default function App() {
             );
           })}
 
+          {footerNote}
+          <div className="flex justify-center pb-8">{helpBtn}</div>
+        </main>
+      </div>
+    );
+  }
+
+  // ---------- Conquistas (administração) ----------
+  if (showWins && admin) {
+    const PATL = { horiz: "Linha Horizontal", vert: "Linha Vertical", diag: "Diagonal", corners: "4 Cantos", conv: "4 Conversões", full: "Cartela Cheia", bpm: "Giro de 175 BPM" };
+    const feed = [];
+    TRACKS.forEach((t) => {
+      const d = allData[t.id]; if (!d) return;
+      const M = TRACK_MISSIONS[t.id];
+      const w = d.winners || {};
+      Object.entries(w.missions || {}).forEach(([mid, e]) => {
+        if (e && e.ts) feed.push({ ts: e.ts, nome: e.name, oq: `🥤 Shake — ${(M.find((m) => m.id === mid) || {}).name || mid}`, gr: t.short });
+      });
+      Object.entries(w.placements || {}).forEach(([k, arr]) => {
+        (arr || []).forEach((e) => { if (e && e.ts) feed.push({ ts: e.ts, nome: e.name, oq: `🏆 ${PATL[k] || k}`, gr: t.short }); });
+      });
+      Object.entries(w.missionQueues || {}).forEach(([mid, arr]) => {
+        (arr || []).forEach((e, idx) => { if (e && e.ts && idx > 0) feed.push({ ts: e.ts, nome: e.name, oq: `⏳ Fila do ${(M.find((m) => m.id === mid) || {}).name || mid} (${idx + 1}º)`, gr: t.short }); });
+      });
+      (d.miniMissions || []).forEach((x) => (x.winners || []).forEach((e, i) => {
+        if (e && e.ts) feed.push({ ts: e.ts, nome: e.name, oq: `⚡ ${x.name} (${i + 1}º)`, gr: t.short });
+      }));
+    });
+    (gData.miniMissions || []).forEach((x) => (x.winners || []).forEach((e, i) => {
+      if (e && e.ts) feed.push({ ts: e.ts, nome: e.name, oq: `⚡🌍 ${x.name} (${i + 1}º)`, gr: "todos" });
+    }));
+    feed.sort((a, b) => b.ts - a.ts);
+
+    const quase = [];
+    const prevM = MISSIONS;
+    TRACKS.forEach((t) => {
+      const d = allData[t.id]; if (!d) return;
+      MISSIONS = TRACK_MISSIONS[t.id];
+      d.students.forEach((s) => {
+        if (s.approved === false) return;
+        const r = computeProgress(s);
+        MISSIONS.forEach((m) => {
+          const rem = m.target - Math.min(r.p[m.id], m.target);
+          if (rem === 1) quase.push({ nome: s.name, oq: m.name, gr: t.short });
+        });
+        if (r.doneCount === 8) quase.push({ nome: s.name, oq: "CARTELA CHEIA (8/9!)", gr: t.short, destaque: true });
+      });
+    });
+    MISSIONS = prevM;
+
+    return (
+      <div className="min-h-screen" style={{ ...pageVars, background: pageBg, fontFamily: "'Montserrat', sans-serif", transition: "background .4s" }}>
+        {fonts}{modal}
+        <main className="max-w-md mx-auto px-5 pb-16 pt-6">
+          <div className="flex items-center justify-between">
+            <button onClick={() => setShowWins(false)} style={{ color: C.oak, fontSize: 13 }}>← Voltar</button>
+            {lockBtn}
+          </div>
+          <h2 className="mt-4 mb-3" style={{ fontWeight: 800, fontSize: 22, color: C.amber, textTransform: "uppercase", letterSpacing: "0.03em" }}>
+            🏅 Últimas e Próximas Conquistas
+          </h2>
+
+          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, letterSpacing: "0.25em", color: C.oak, textTransform: "uppercase", margin: "6px 0" }}>
+            🔥 Próximas conquistas · {quase.length}
+          </div>
+          {quase.length === 0 && <div style={{ color: C.mut, fontSize: 12.5, marginBottom: 10 }}>Ninguém a 1 passo de completar algo — ainda.</div>}
+          <div className="flex flex-col gap-1 mb-4">
+            {quase.slice(0, 40).map((q, i) => (
+              <div key={i} className="rounded-lg px-3 py-1.5 flex items-center gap-2" style={{ background: C.panel, border: `1px solid ${q.destaque ? C.amber : C.line}` }}>
+                <span className="flex-1 min-w-0 truncate" style={{ color: C.cream, fontWeight: 700, fontSize: 12.5 }}>{q.nome}</span>
+                <span className="shrink-0" style={{ color: q.destaque ? C.amber : C.amberSoft, fontSize: 11.5, fontWeight: 700 }}>falta 1 · {q.oq}</span>
+                <span className="shrink-0" style={{ color: C.mut, fontSize: 10, fontFamily: "'DM Mono', monospace" }}>{q.gr}</span>
+              </div>
+            ))}
+          </div>
+          <div style={{ color: C.mut, fontSize: 11, marginBottom: 14, lineHeight: 1.5 }}>
+            💡 Use essa lista pro empurrãozinho no WhatsApp: "você está a UMA aula do shake!"
+          </div>
+
+          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, letterSpacing: "0.25em", color: C.oak, textTransform: "uppercase", margin: "6px 0" }}>
+            🏅 Últimas conquistas · {feed.length}
+          </div>
+          {feed.length === 0 && <div style={{ color: C.mut, fontSize: 12.5 }}>Nenhuma conquista registrada ainda.</div>}
+          <div className="flex flex-col gap-1">
+            {feed.slice(0, 60).map((f, i) => (
+              <div key={i} className="rounded-lg px-3 py-1.5 flex items-center gap-2" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+                <span className="shrink-0" style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: C.mut }}>{fmtTs(f.ts)}</span>
+                <span className="min-w-0 truncate" style={{ color: C.amber, fontWeight: 700, fontSize: 12.5 }}>{f.nome}</span>
+                <span className="flex-1 min-w-0 truncate" style={{ color: C.cream, fontSize: 11.5 }}>{f.oq}</span>
+                <span className="shrink-0" style={{ color: C.mut, fontSize: 10, fontFamily: "'DM Mono', monospace" }}>{f.gr}</span>
+              </div>
+            ))}
+          </div>
+          {footerNote}
+          <div className="flex justify-center pb-8">{helpBtn}</div>
+        </main>
+      </div>
+    );
+  }
+
+  // ---------- Relatório Geral (administração) ----------
+  if (showRel && admin) {
+    const semanas = [];
+    {
+      let ini = new Date(DESAFIO_INICIO + "T12:00");
+      const fim = new Date("2026-09-20T12:00");
+      let n = 1;
+      while (ini <= fim) {
+        const f2 = new Date(ini); f2.setDate(f2.getDate() + 6);
+        semanas.push({ n, ini: ini.toISOString().slice(0, 10), fim: (f2 > fim ? fim : f2).toISOString().slice(0, 10) });
+        ini = new Date(f2); ini.setDate(ini.getDate() + 1); n++;
+      }
+    }
+    const hoje = todayStr();
+    const idTs = (id) => { const v = parseInt(id, 36); return v > 1.7e12 && v < 1.9e12 ? v : null; };
+    const linhas = semanas.map((w) => {
+      let aulas = 0, novos = 0;
+      TRACKS.forEach((t) => {
+        const d = allData[t.id]; if (!d) return;
+        d.students.forEach((s) => {
+          (s.records || []).forEach((r) => { if (r.status === "ok" && r.date >= w.ini && r.date <= w.fim) aulas++; });
+          const ts = idTs(s.id);
+          if (ts) { const dt = new Date(ts).toISOString().slice(0, 10); if (dt >= w.ini && dt <= w.fim) novos++; }
+        });
+      });
+      return { ...w, aulas, novos };
+    });
+    const tot = { alunos: 0, aulas: 0, pend: 0, conv: 0, bought: 0 };
+    const porGrupo = TRACKS.map((t) => {
+      const d = allData[t.id];
+      const alunos = d ? d.students.filter((s) => s.approved !== false).length : 0;
+      let aulas = 0, pend = 0, conv = 0, bought = 0;
+      if (d) d.students.forEach((s) => {
+        (s.records || []).forEach((r) => { if (r.status === "ok") aulas++; else if (r.status === "pending") pend++; });
+        (s.guests || []).forEach((g) => { if (g.status === "ok") conv++; if (g.boughtTs || g.bought) bought++; });
+      });
+      tot.alunos += alunos; tot.aulas += aulas; tot.pend += pend; tot.conv += conv; tot.bought += bought;
+      return { t, alunos, aulas, conv, bought };
+    });
+    const baixarCSV = (nome, linhas) => {
+      const csv = "\ufeff" + linhas.map((l) => l.map((c) => `"${String(c == null ? "" : c).replace(/"/g, '""')}"`).join(";")).join("\n");
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = nome; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+    };
+    const REL = (() => {
+      const pendA = [["Grupo", "Aluno", "WhatsApp", "Data", "Horário", "Professor", "Sinalizado ⚠️"]];
+      const pendG = [["Grupo", "Anfitrião", "WhatsApp", "Convidado", "Data", "Horário", "Sinalizado ⚠️"]];
+      const aulasCSV = [["Grupo", "Aluno", "Data", "Horário", "Professor"]];
+      const alunosCSV = [["Grupo", "Nome", "WhatsApp", "Liberado", "Aulas validadas", "Pendentes", "Missões (de 9)"]];
+      const convsCSV = [["Grupo", "Anfitrião", "Convidado", "Data", "Horário", "Status", "Tipo", "Fechou pacote 10+"]];
+      const missoesCSV = [["Grupo", "Missão", "Meta", "Completaram", "A 1 de completar"]];
+      const profMap = {};
+      const prevM = MISSIONS;
+      TRACKS.forEach((t) => {
+        const d = allData[t.id]; if (!d) return;
+        MISSIONS = TRACK_MISSIONS[t.id];
+        const done = {}, quase1 = {};
+        d.students.forEach((s) => {
+          const r = computeProgress(s);
+          const fone = s.phone ? fmtPhone(s.phone) : "";
+          let ok = 0, pd = 0;
+          (s.records || []).forEach((rr) => {
+            if (rr.status === "ok") {
+              ok++;
+              aulasCSV.push([t.short, s.name, fmtBR(rr.date), rr.slot.replace(":", "h"), rr.instructor || ""]);
+              if (rr.instructor) {
+                profMap[rr.instructor] = profMap[rr.instructor] || {};
+                profMap[rr.instructor][t.id] = (profMap[rr.instructor][t.id] || 0) + 1;
+              }
+            } else if (rr.status === "pending") {
+              pd++;
+              pendA.push([t.short, s.name, fone, fmtBR(rr.date), rr.slot.replace(":", "h"), rr.instructor || "", rr.alert ? "SIM" : ""]);
+            }
+          });
+          (s.guests || []).forEach((g) => {
+            if (g.status === "pending") {
+              pd++;
+              pendG.push([t.short, s.name, fone, g.name, fmtBR(g.date), (g.slot || "").replace(":", "h"), g.alert ? "SIM" : ""]);
+            }
+            convsCSV.push([t.short, s.name, g.name, fmtBR(g.date), (g.slot || "").replace(":", "h"), g.status === "ok" ? "validado" : "pendente", g.kind === "spin" ? "aluno convidado 📣" : "novo", (g.boughtTs || g.bought) ? "SIM" : ""]);
+          });
+          alunosCSV.push([t.short, s.name, fone, s.approved === false ? "não" : "sim", ok, pd, r.doneCount]);
+          MISSIONS.forEach((m) => {
+            const got = Math.min(r.p[m.id], m.target);
+            if (got >= m.target) done[m.id] = (done[m.id] || 0) + 1;
+            else if (m.target - got === 1) quase1[m.id] = (quase1[m.id] || 0) + 1;
+          });
+        });
+        MISSIONS.forEach((m) => missoesCSV.push([t.short, m.name, m.target, done[m.id] || 0, quase1[m.id] || 0]));
+      });
+      MISSIONS = prevM;
+      const profsCSV = [["Professor", "Grupo", "Aulas validadas"]];
+      Object.keys(profMap).sort().forEach((pr) => {
+        let tt = 0;
+        TRACKS.forEach((t) => {
+          const n = profMap[pr][t.id] || 0;
+          if (n) profsCSV.push([pr, t.short, n]);
+          tt += n;
+        });
+        profsCSV.push([pr, "TOTAL", tt]);
+      });
+      return { pendA, pendG, aulasCSV, alunosCSV, convsCSV, profsCSV, missoesCSV };
+    })();
+    const BtnCSV = ({ rotulo, n, arq, dados }) => (
+      <button
+        onClick={() => baixarCSV(`${arq}-${todayStr()}.csv`, dados)}
+        className="w-full rounded-lg px-3 py-2.5 text-left font-bold flex items-center justify-between"
+        style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.amberSoft, fontSize: 12.5 }}
+      >
+        <span>{rotulo}</span>
+        <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: C.mut }}>{n} · baixar ⬇</span>
+      </button>
+    );
+    const hNorm = (s) => {
+      const d = String(s || "").replace(/[^0-9]/g, "");
+      if (d.length < 3 || d.length > 4) return "";
+      const hh = (d.length === 3 ? "0" + d[0] : d.slice(0, 2));
+      return hh + ":" + d.slice(-2);
+    };
+    const dNorm = (s) => {
+      const t = String(s || "").trim();
+      let m = t.match(/(\d{4})-(\d{2})-(\d{2})/);
+      if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+      m = t.match(/(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?/);
+      if (m) {
+        const ano = m[3] ? (m[3].length === 2 ? "20" + m[3] : m[3]) : "2026";
+        return `${ano}-${String(m[2]).padStart(2, "0")}-${String(m[1]).padStart(2, "0")}`;
+      }
+      return "";
+    };
+    const nomeBate = (a, b) => {
+      const x = norm(a), y = norm(b);
+      if (!x || !y) return false;
+      return x === y || x.includes(y) || y.includes(x);
+    };
+    const analisarArquivo = (file) => {
+      if (!file) return;
+      const fr = new FileReader();
+      fr.onload = () => {
+        let txt = "";
+        try {
+          const buf = new Uint8Array(fr.result);
+          txt = new TextDecoder("utf-8", { fatal: false }).decode(buf);
+          if (txt.includes("\uFFFD")) txt = new TextDecoder("iso-8859-1").decode(buf);
+        } catch { setImpRes({ erro: "Não consegui ler o arquivo." }); return; }
+        const linhas = txt.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+        const presencas = [];
+        linhas.forEach((l) => {
+          const low = norm(l);
+          if (low.includes("nome") && (low.includes("hora") || low.includes("data") || low.includes("telefone"))) return;
+          const sep = (l.match(/;/g) || []).length >= (l.match(/,/g) || []).length ? ";" : (l.includes("\t") ? "\t" : ",");
+          const cells = l.split(sep).map((c) => c.replace(/^"|"$/g, "").trim());
+          let nome = "", fone = "", dataA = "", hora = "";
+          cells.forEach((c) => {
+            if (!c) return;
+            if (!hora && hNorm(c) && /\d{1,2}[:h]?\d{2}/.test(c) && c.replace(/[^0-9]/g, "").length <= 4) { hora = hNorm(c); return; }
+            if (!dataA && dNorm(c) && /\d/.test(c) && (c.includes("/") || /\d{4}-\d{2}/.test(c))) { dataA = dNorm(c); return; }
+            const digs = c.replace(/[^0-9]/g, "");
+            if (!fone && digs.length >= 8 && digs.length <= 14 && digs.length >= c.replace(/[^a-zA-ZÀ-ú]/g, "").length) { fone = c; return; }
+            if (!nome && /[a-zA-ZÀ-ú]{2,}/.test(c)) { nome = c; return; }
+          });
+          if ((nome || fone) && dataA && hora) presencas.push({ nome, fone, dataA, hora });
+        });
+        if (!presencas.length) { setImpRes({ erro: "Nenhuma linha válida encontrada. O arquivo precisa ter colunas com Nome (ou Telefone), Data e Horário." }); return; }
+        const casos = [];
+        TRACKS.forEach((t) => {
+          const d = allData[t.id]; if (!d) return;
+          d.students.forEach((s) => {
+            (s.records || []).forEach((r) => {
+              if (r.status !== "pending" || r.alert) return;
+              const bate = presencas.some((pz) =>
+                pz.dataA === r.date && pz.hora === r.slot &&
+                ((pz.nome && nomeBate(pz.nome, s.name)) || (pz.fone && s.phone && phonesMatch(pz.fone, s.phone)))
+              );
+              if (bate) casos.push({ tid: t.id, sid: s.id, rid: r.id, nome: s.name, gr: t.short, data: r.date, slot: r.slot });
+            });
+          });
+        });
+        setImpRes({ presencas: presencas.length, casos });
+      };
+      fr.readAsArrayBuffer(file);
+    };
+    const aplicarImport = () => {
+      if (!impRes || !impRes.casos || !impRes.casos.length) return;
+      const porTid = {};
+      impRes.casos.forEach((c) => { (porTid[c.tid] = porTid[c.tid] || []).push(c); });
+      Object.entries(porTid).forEach(([tid, lista]) => {
+        mutateTrack(tid, (d) => {
+          lista.forEach((c) => {
+            const s = d.students.find((x) => x.id === c.sid);
+            const r = s && (s.records || []).find((x) => x.id === c.rid);
+            if (r && r.status === "pending" && !r.alert) r.status = "ok";
+          });
+        });
+      });
+      avisar(`🤖 ${impRes.casos.length} check-in${impRes.casos.length === 1 ? "" : "s"} validado${impRes.casos.length === 1 ? "" : "s"} pelo arquivo!`);
+      setImpRes(null);
+    };
+    const Row = ({ a, b, forte }) => (
+      <div className="flex justify-between items-baseline" style={{ fontSize: 12.5, lineHeight: 1.9, color: forte ? C.cream : C.mut, fontWeight: forte ? 800 : 500 }}>
+        <span>{a}</span>
+        <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 12 }}>{b}</span>
+      </div>
+    );
+    return (
+      <div className="min-h-screen" style={{ ...pageVars, background: pageBg, fontFamily: "'Montserrat', sans-serif", transition: "background .4s" }}>
+        {fonts}{modal}
+        <main className="max-w-md mx-auto px-5 pb-16 pt-6">
+          <div className="flex items-center justify-between">
+            <button onClick={() => setShowRel(false)} style={{ color: C.oak, fontSize: 13 }}>← Voltar</button>
+            {lockBtn}
+          </div>
+          <h2 className="mt-4 mb-3" style={{ fontWeight: 800, fontSize: 22, color: C.amber, textTransform: "uppercase", letterSpacing: "0.03em" }}>
+            📊 Relatório Geral
+          </h2>
+          <div className="rounded-xl p-4 mb-3" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, letterSpacing: "0.25em", color: C.oak, textTransform: "uppercase", marginBottom: 6 }}>Participantes e aulas</div>
+            {porGrupo.map(({ t, alunos, aulas }) => (
+              <Row key={t.id} a={t.short || t.label} b={`${alunos} alunos · ${aulas} aulas`} />
+            ))}
+            <div style={{ borderTop: `1px dashed ${C.line}`, marginTop: 4, paddingTop: 4 }}>
+              <Row a="TOTAL" b={`${tot.alunos} alunos · ${tot.aulas} aulas`} forte />
+              {tot.pend > 0 && <Row a="aguardando validação" b={String(tot.pend)} />}
+            </div>
+          </div>
+          <div className="rounded-xl p-4 mb-3" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, letterSpacing: "0.25em", color: C.oak, textTransform: "uppercase", marginBottom: 6 }}>Convidados</div>
+            <Row a="Aulas experimentais validadas" b={String(tot.conv)} forte />
+            <Row a="🧸 Fecharam pacote 10+" b={String(tot.bought)} forte />
+          </div>
+          <div className="rounded-xl p-4" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, letterSpacing: "0.25em", color: C.oak, textTransform: "uppercase", marginBottom: 6 }}>Crescimento semana a semana</div>
+            {linhas.map((w, i) => {
+              const futura = w.ini > hoje;
+              const ant = i > 0 ? linhas[i - 1].aulas : 0;
+              const delta = i > 0 && ant > 0 && !futura ? Math.round(((w.aulas - ant) / ant) * 100) : null;
+              return (
+                <div key={w.n} style={{ opacity: futura ? 0.35 : 1 }}>
+                  <Row
+                    a={`Sem ${w.n} · ${fmtBR(w.ini)}–${fmtBR(w.fim)}`}
+                    b={futura ? "—" : `${w.aulas} aulas${delta != null ? ` (${delta >= 0 ? "+" : ""}${delta}%)` : ""} · ${w.novos} novos`}
+                    forte={!futura && w.ini <= hoje && hoje <= w.fim}
+                  />
+                </div>
+              );
+            })}
+            <div style={{ color: C.mut, fontSize: 10.5, marginTop: 6, lineHeight: 1.5 }}>
+              "Novos" = cadastros feitos pelo app na semana. Semana atual em destaque.
+            </div>
+          </div>
+          <div className="rounded-xl p-4 mt-3" style={{ background: C.panel, border: `1.5px solid ${C.amber}66` }}>
+            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, letterSpacing: "0.25em", color: C.oak, textTransform: "uppercase", marginBottom: 4 }}>
+              📥 Gerar listas (CSV)
+            </div>
+            <div style={{ color: C.mut, fontSize: 11.5, lineHeight: 1.5, marginBottom: 10 }}>
+              Baixa em CSV e abre direto no Excel/Planilhas — perfeito pra cruzar com o relatório do sistema e validar em lote.
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <BtnCSV rotulo="⏳ Aulas PENDENTES" n={REL.pendA.length - 1} arq="aulas-pendentes" dados={REL.pendA} />
+              <BtnCSV rotulo="📣 Amigos PENDENTES" n={REL.pendG.length - 1} arq="amigos-pendentes" dados={REL.pendG} />
+              <BtnCSV rotulo="✅ Aulas validadas (todas)" n={REL.aulasCSV.length - 1} arq="aulas-validadas" dados={REL.aulasCSV} />
+              <BtnCSV rotulo="👥 Alunos (cadastro completo)" n={REL.alunosCSV.length - 1} arq="alunos" dados={REL.alunosCSV} />
+              <BtnCSV rotulo="📣 Convidados e conversões" n={REL.convsCSV.length - 1} arq="convidados" dados={REL.convsCSV} />
+              <BtnCSV rotulo="🧑‍🏫 Aulas por professor" n={REL.profsCSV.length - 1} arq="professores" dados={REL.profsCSV} />
+              <BtnCSV rotulo="🎯 Missões por desafio" n={REL.missoesCSV.length - 1} arq="missoes" dados={REL.missoesCSV} />
+            </div>
+          </div>
+          <div className="rounded-xl p-4 mt-3" style={{ background: C.panel, border: `1.5px solid ${C.ok}66` }}>
+            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, letterSpacing: "0.25em", color: C.ok, textTransform: "uppercase", marginBottom: 4 }}>
+              🤖 Validação automática
+            </div>
+            <div style={{ color: C.mut, fontSize: 11.5, lineHeight: 1.6, marginBottom: 10 }}>
+              Importe o relatório de presenças do seu sistema (CSV com colunas <b style={{ color: C.cream }}>Nome; Telefone; Data; Horário</b> — em qualquer ordem).
+              Eu caso cada linha com as aulas pendentes por <b style={{ color: C.cream }}>(nome OU telefone) + data + horário</b>, tolerando maiúsculas, acentos, sobrenome a mais/a menos, +55, símbolos e formatos de hora.
+              Sinalizadas ⚠️ ficam de fora. Nada é gravado antes da sua confirmação.
+            </div>
+            {!impRes && (
+              <label className="block w-full rounded-lg py-3 text-center font-bold" style={{ background: C.ok, color: C.bg, fontSize: 13, cursor: "pointer" }}>
+                📂 Escolher arquivo do sistema (.csv)
+                <input type="file" accept=".csv,.txt,text/csv" style={{ display: "none" }}
+                  onChange={(e) => { analisarArquivo(e.target.files && e.target.files[0]); e.target.value = ""; }} />
+              </label>
+            )}
+            {impRes && impRes.erro && (
+              <div>
+                <div className="rounded-lg px-3 py-2 mb-2" style={{ background: "#B1556022", border: "1px solid #B15560", color: "#E8A0A8", fontSize: 12 }}>{impRes.erro}</div>
+                <button onClick={() => setImpRes(null)} className="rounded-lg px-3 py-1.5" style={{ color: C.mut, fontSize: 12, border: `1px solid ${C.line}` }}>tentar outro arquivo</button>
+              </div>
+            )}
+            {impRes && !impRes.erro && (
+              <div>
+                <div style={{ color: C.cream, fontSize: 12.5, lineHeight: 1.6, marginBottom: 8 }}>
+                  📄 {impRes.presencas} presença{impRes.presencas === 1 ? "" : "s"} no arquivo · <b style={{ color: C.ok }}>{impRes.casos.length} pendência{impRes.casos.length === 1 ? "" : "s"} casaram</b> e podem ser validadas:
+                </div>
+                <div className="flex flex-col gap-1 mb-2" style={{ maxHeight: 180, overflowY: "auto" }}>
+                  {impRes.casos.map((c, i) => (
+                    <div key={i} className="rounded px-2.5 py-1 flex items-center gap-2" style={{ background: C.panelSoft, fontSize: 11.5 }}>
+                      <span className="flex-1 min-w-0 truncate" style={{ color: C.cream, fontWeight: 700 }}>{c.nome}</span>
+                      <span className="shrink-0" style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: C.mut }}>{fmtBR(c.data)} {c.slot.replace(":", "h")} · {c.gr}</span>
+                    </div>
+                  ))}
+                  {impRes.casos.length === 0 && <div style={{ color: C.mut, fontSize: 12 }}>Nenhuma pendência casou — confira datas e horários do arquivo.</div>}
+                </div>
+                <div className="flex gap-2">
+                  {impRes.casos.length > 0 && (
+                    <button onClick={aplicarImport} className="flex-1 rounded-lg py-2.5 font-bold" style={{ background: C.ok, color: C.bg, fontSize: 13 }}>
+                      ✓ Validar {impRes.casos.length} agora
+                    </button>
+                  )}
+                  <button onClick={() => setImpRes(null)} className="rounded-lg px-4" style={{ color: C.mut, fontSize: 12, border: `1px solid ${C.line}` }}>cancelar</button>
+                </div>
+              </div>
+            )}
+          </div>
           {footerNote}
           <div className="flex justify-center pb-8">{helpBtn}</div>
         </main>
@@ -1967,6 +2413,24 @@ export default function App() {
               ⚡ MISSÕES RELÂMPAGO → criar e gerenciar
             </button>
           )}
+          {admin && (
+            <button
+              onClick={() => { setShowRel(true); window.scrollTo({ top: 0 }); }}
+              className="w-full rounded-lg px-3 py-2.5 mt-2 text-center font-bold"
+              style={{ background: C.panel, color: C.amberSoft, fontSize: 13, border: `1px solid ${C.line}` }}
+            >
+              📊 RELATÓRIO GERAL → alunos, aulas e crescimento semanal
+            </button>
+          )}
+          {admin && (
+            <button
+              onClick={() => { setShowWins(true); window.scrollTo({ top: 0 }); }}
+              className="w-full rounded-lg px-3 py-2.5 mt-2 text-center font-bold"
+              style={{ background: C.panel, color: C.amberSoft, fontSize: 13, border: `1px solid ${C.line}` }}
+            >
+              🏅 ÚLTIMAS E PRÓXIMAS CONQUISTAS
+            </button>
+          )}
           {footerNote}
         </main>
       </div>
@@ -2123,6 +2587,10 @@ export default function App() {
               {bullet(<span>Esqueceu de registrar? Sem pânico: dá para registrar <b>dias anteriores</b> (a partir de 6/ago). Datas futuras não valem.</span>, 4)}
               {bullet(<span>Existem <b>3 desafios separados</b> — Ilimitados, Pacotes e Híbridos. Cada grupo compete apenas entre si, com metas ajustadas ao seu ritmo.</span>, 5)}
               {bullet(<span><b>Esqueceu a senha?</b> Toque em "🔑 Esqueci minha senha", confirme seu nome + o WhatsApp cadastrado e crie uma nova na hora — sem precisar da recepção.</span>, 7)}
+              {bullet(<span><b>O check-in é feito APÓS o fim da aula</b> — nem um minuto antes ou durante. Se houver denúncia de check-in antes do término, o registro será conferido e <b>anulado</b>.</span>, 8)}
+              {bullet(<span><b>Critério de desempate</b> de qualquer prêmio: o <b>horário do check-in</b> — quem registrou primeiro leva.</span>, 9)}
+              {bullet(<span><b>Só valem aulas de BIKE.</b> Aulas da modalidade Strong não fazem parte do desafio e não são consideradas.</span>, 10)}
+              {bullet(<span><b>Desempate do desafio inteiro:</b> quem fechar primeiro as <b>4 vendas de pacote 10+ (4×10)</b> vence.</span>, 11)}
               {bullet(
                 track === "ilimitado" ? (
                   <span><b>O que vale neste desafio:</b> as aulas do seu plano ilimitado (Spin Mensal, Spin Ilimitado ou Spin & Strong Ilimitado). O que conta é pedalar! 🚴</span>
@@ -3709,6 +4177,33 @@ export default function App() {
             </div>
           );
         })()}
+        {!admin && !spy && student.pass && unlocks[student.id] === student.pass && student.approved !== false && (() => {
+          const rank2 = data.students
+            .filter((s2) => s2.approved !== false)
+            .map((s2) => { const r2 = computeProgress(s2); const f2 = MISSIONS.reduce((n, m) => n + Math.min(r2.p[m.id], m.target), 0); return { id: s2.id, nome: s2.name, f: f2, dc: r2.doneCount, mar: r2.p.maratona }; })
+            .sort((a, b) => b.f - a.f || b.dc - a.dc || b.mar - a.mar || a.nome.localeCompare(b.nome));
+          const idx = rank2.findIndex((x) => x.id === student.id);
+          const rival = idx > 0 ? rank2[idx - 1] : null;
+          const eu = idx >= 0 ? rank2[idx] : null;
+          const restos = MISSIONS
+            .map((m) => ({ m, rem: m.target - Math.min(res.p[m.id], m.target) }))
+            .filter((x) => x.rem > 0)
+            .sort((a, b) => a.rem - b.rem);
+          const prox = restos[0];
+          if (!prox && !rival) return null;
+          return (
+            <div className="rounded-xl px-4 py-3 mb-3" style={{ background: `linear-gradient(120deg, ${C.oak}18, transparent)`, border: `1.5px dashed ${C.oak}` }}>
+              <div style={{ color: C.oak, fontWeight: 800, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 3 }}>
+                🔥 Acelera!
+              </div>
+              <div style={{ color: C.cream, fontSize: 12.5, lineHeight: 1.6 }}>
+                {prox && <span>Falta{prox.rem === 1 ? "" : "m"} só <b style={{ color: C.amberSoft }}>{prox.rem}</b> pra você completar o <b style={{ color: C.amberSoft }}>{prox.m.name}</b>. </span>}
+                {rival && eu && <span>E {rival.nome.split(" ")[0]} está <b style={{ color: C.amberSoft }}>{Math.max(1, rival.f - eu.f)} bolinha{rival.f - eu.f === 1 ? "" : "s"}</b> à sua frente no ranking — uma aula pode virar o jogo. 🚴</span>}
+                {rival === null && <span>Você está em <b style={{ color: C.amberSoft }}>1º lugar</b> — agora é defender o trono! 👑</span>}
+              </div>
+            </div>
+          );
+        })()}
         <div className="flex justify-end" style={{ marginBottom: 4 }}>
           <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 12, color: res.full ? C.amber : C.mut }}>
             {res.doneCount}/9 missões
@@ -3737,23 +4232,37 @@ export default function App() {
           </div>
         )}
 
-        {(() => {
+        {student.approved !== false && (() => {
           const misturadas = [...(gData.miniMissions || []), ...(data.miniMissions || [])];
           const vencidas = misturadas.filter((x) => (x.winners || []).some((w) => w.id === student.id));
-          if (!vencidas.length) return null;
+          const AWme = computeAwards(data);
+          const meusShakes = MISSIONS.filter((m) => AWme.shakes[m.id] && AWme.shakes[m.id].id === student.id).map((m) => m.name);
+          const PATL = { horiz: "Linha Horizontal", vert: "Linha Vertical", diag: "Diagonal", corners: "4 Cantos", conv: "4 Conversões", full: "Cartela Cheia", bpm: "Giro de 175 BPM" };
+          const meusPats = Object.keys(PATL).filter((k) => AWme.pats[k] && AWme.pats[k].id === student.id).map((k) => PATL[k]);
+          const rankAll = data.students
+            .filter((s2) => s2.approved !== false)
+            .map((s2) => { const r2 = computeProgress(s2); const f2 = MISSIONS.reduce((n, m) => n + Math.min(r2.p[m.id], m.target), 0); return { id: s2.id, nome: s2.name, f: f2, dc: r2.doneCount, mar: r2.p.maratona }; })
+            .sort((a, b) => b.f - a.f || b.dc - a.dc || b.mar - a.mar || a.nome.localeCompare(b.nome));
+          const minhaPos = rankAll.findIndex((x) => x.id === student.id) + 1;
+          const chip = (txt, key, ouro) => (
+            <span key={key} className="rounded-full px-2.5 py-1" style={ouro
+              ? { background: `linear-gradient(120deg, #D9A954, #B08D3E)`, color: "#141414", fontSize: 11, fontWeight: 800 }
+              : { background: C.panel, color: C.amberSoft, fontSize: 11, fontWeight: 800, border: `1px solid ${C.amber}66` }}>
+              {txt}
+            </span>
+          );
           return (
             <div className="rounded-xl px-4 py-3 mt-3" style={{ background: C.panelSoft, border: `1px solid ${C.oak}` }}>
               <div style={{ color: C.oak, fontWeight: 800, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 4 }}>
-                ⚡ Medalhas relâmpago
+                🏅 Minhas conquistas
               </div>
               <div className="flex flex-wrap gap-1.5">
+                {minhaPos > 0 && chip(`🏆 ${minhaPos}º no ranking`, "pos", minhaPos <= 3)}
+                {meusShakes.map((n, i) => chip(`🥤 ${n}`, "sk" + i, true))}
+                {meusPats.map((n, i) => chip(`🏆 ${n}`, "pt" + i, true))}
                 {vencidas.map((x) => {
                   const posV = (x.winners || []).findIndex((w) => w.id === student.id) + 1;
-                  return (
-                    <span key={x.id} className="rounded-full px-2.5 py-1" style={{ background: `linear-gradient(120deg, #D9A954, #B08D3E)`, color: "#141414", fontSize: 11, fontWeight: 800 }}>
-                      ⚡ {posV}º · {x.name}
-                    </span>
-                  );
+                  return chip(`⚡ ${posV}º · ${x.name}`, "mm" + x.id, true);
                 })}
               </div>
             </div>
@@ -3816,8 +4325,11 @@ export default function App() {
         {/* Registrar aula */}
         {(admin || (student.pass && unlocks[student.id] === student.pass)) && student.approved !== false && (
         <section id="sec-registrar" className="rounded-xl p-4 mt-6" style={{ background: C.panel, border: `1px solid ${C.line}`, scrollMarginTop: 16 }}>
-          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, letterSpacing: "0.25em", color: C.oak, textTransform: "uppercase", marginBottom: 10 }}>
+          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, letterSpacing: "0.25em", color: C.oak, textTransform: "uppercase", marginBottom: 6 }}>
             {admin ? "Registrar aula (validada)" : "Registrar minha aula"}
+          </div>
+          <div style={{ color: C.mut, fontSize: 11.5, lineHeight: 1.5, marginBottom: 10 }}>
+            🚴 O check-in vale para as <b style={{ color: C.cream }}>aulas de BIKE</b>. Aulas da modalidade <b style={{ color: C.cream }}>Strong não fazem parte do desafio</b> e não são consideradas. Registre <b style={{ color: C.cream }}>somente após o fim da aula</b>.
           </div>
           <div className="flex flex-col gap-2">
             <div className="flex gap-2">
@@ -4141,9 +4653,20 @@ export default function App() {
                   </div>
                   <div className="flex-1 min-w-0 truncate" style={{ color: C.mut, fontSize: 13 }}>{r.instructor || "—"}</div>
                   {r.status === "pending" && !emEd && (
-                    <span className="rounded px-1.5 py-0.5 shrink-0" style={{ fontSize: 10, background: C.wineDeep, color: C.amberSoft }}>
-                      pendente
+                    <span className="rounded px-1.5 py-0.5 shrink-0" style={{ fontSize: 10, background: r.alert ? "#B15560" : C.wineDeep, color: r.alert ? C.cream : C.amberSoft, fontWeight: r.alert ? 800 : 500 }}>
+                      {r.alert ? "⚠️ verificar" : "pendente"}
                     </span>
+                  )}
+                  {admin && r.status === "pending" && !emEd && confirmDel !== `hr:${r.id}` && (
+                    <button
+                      onClick={() => mutate((d) => {
+                        const s2 = d.students.find((x) => x.id === view);
+                        const rec2 = s2 && (s2.records || []).find((x) => x.id === r.id);
+                        if (rec2) rec2.alert = !rec2.alert;
+                      })}
+                      className="shrink-0" title={r.alert ? "Remover sinalização" : "Sinalizar incongruência"}
+                      style={{ background: r.alert ? "#B15560" : "transparent", border: r.alert ? "none" : `1px solid ${C.line}`, borderRadius: 6, fontSize: 11, cursor: "pointer", padding: "2px 5px" }}
+                    >⚠️</button>
                   )}
                   {admin && r.status === "pending" && !emEd && confirmDel !== `hr:${r.id}` && (
                     <button
@@ -4176,6 +4699,19 @@ export default function App() {
                     </div>
                   )}
                 </div>
+                {!admin && r.status === "pending" && r.alert && (
+                  <a
+                    href={`https://wa.me/${AJUDA_WHATSAPP}?text=${encodeURIComponent(`Oi! Gostaria de entender por que meu check-in de ${fmtBR(r.date)} às ${r.slot.replace(":", "h")} está pendente. Qual foi o erro, para que eu possa corrigir? 🙏 — ${student.name}`)}`}
+                    target="_blank" rel="noreferrer"
+                    className="block mt-2 rounded-lg px-3 py-2"
+                    style={{ background: "#B1556022", border: "1px solid #B15560", textDecoration: "none" }}
+                  >
+                    <div style={{ color: "#E8A0A8", fontSize: 11.5, lineHeight: 1.5 }}>
+                      ⚠️ Este check-in está pendente por alguma <b>incongruência na informação</b>.
+                      <span style={{ color: C.cream, fontWeight: 700 }}> Toque aqui</span> para falar com a recepção e corrigir. 💬
+                    </div>
+                  </a>
+                )}
                 {emEd && (
                   <div className="mt-2 flex flex-col gap-1.5">
                     <div className="flex gap-1.5">
@@ -4234,8 +4770,8 @@ export default function App() {
             <button
               onClick={() => mutate((d) => {
                 const s = d.students.find((x) => x.id === view);
-                s.records.forEach((r) => { if (r.status === "pending") r.status = "ok"; });
-                (s.guests || []).forEach((g) => { if (g.status === "pending") g.status = "ok"; });
+                s.records.forEach((r) => { if (r.status === "pending" && !r.alert) r.status = "ok"; });
+                (s.guests || []).forEach((g) => { if (g.status === "pending" && !g.alert) g.status = "ok"; });
               })}
               className="mt-3 w-full rounded-lg py-2 font-bold"
               style={{ background: C.ok, color: C.bg, fontSize: 13 }}
