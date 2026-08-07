@@ -746,6 +746,7 @@ export default function App() {
   const [expC, setExpC] = useState(null);
   const [spy, setSpy] = useState(false);
   const [editH, setEditH] = useState(null);
+  const [selfEditH, setSelfEditH] = useState(null);
   const [editN, setEditN] = useState(null);
   const [gData, setGData] = useState({ miniMissions: [] });
   const [miniPage, setMiniPage] = useState(null);
@@ -1280,7 +1281,7 @@ export default function App() {
                               {!editando && (
                                 <div style={{ color: C.mut, fontSize: 11.5, fontFamily: "'DM Mono', monospace" }}>
                                   {tipo === "rec"
-                                    ? `aula · ${fmtBR(it.date)} · ${it.slot.replace(":", "h")} · ${it.instructor}`
+                                    ? `aula · ${fmtBR(it.date)} · ${it.slot.replace(":", "h")} · ${it.instructor}${it.correctedByStudent && !it.alert ? " · ✎ corrigido" : ""}`
                                     : `amigo · ${it.name} · ${fmtBR(it.date)} · ${it.slot.replace(":", "h")}`}
                                 </div>
                               )}
@@ -1298,6 +1299,14 @@ export default function App() {
                                 className="shrink-0 rounded px-1" title={it.alert ? "Remover sinalização" : "Sinalizar incongruência (não valida, não apaga)"}
                                 style={{ background: it.alert ? "#B15560" : "transparent", border: it.alert ? "none" : `1px solid ${C.line}`, borderRadius: 6, fontSize: 12, cursor: "pointer", padding: "2px 5px" }}
                               >⚠️</button>
+                            )}
+                            {tipo === "rec" && it.alert && s.phone && !editando && (
+                              <a
+                                href={`https://wa.me/55${normPhone(s.phone)}?text=${encodeURIComponent(`Oi ${s.name.split(" ")[0]}! Sua aula de ${fmtBR(it.date)} às ${it.slot.replace(":", "h")} está com informações incongruentes no nosso sistema. Dá uma olhadinha no seu painel do Desafio e corrige direto por lá — daí a gente valida rapidinho! 🙏`)}`}
+                                target="_blank" rel="noreferrer"
+                                className="shrink-0 rounded px-1" title="Avisar aluno pelo WhatsApp"
+                                style={{ background: "transparent", border: `1px solid ${C.line}`, borderRadius: 6, fontSize: 12, textDecoration: "none", padding: "2px 5px", display: "inline-block" }}
+                              >📲</a>
                             )}
                             {tipo === "rec" && !editando && (
                               <button
@@ -2625,8 +2634,8 @@ export default function App() {
               {bullet(<span><b>Esqueceu a senha?</b> Toque em "🔑 Esqueci minha senha", confirme seu nome + o WhatsApp cadastrado e crie uma nova na hora — sem precisar da recepção.</span>, 7)}
               {bullet(<span><b>O check-in é feito APÓS o fim da aula</b> — nem um minuto antes ou durante. Se houver denúncia de check-in antes do término, o registro será conferido e <b>anulado</b>.</span>, 8)}
               {bullet(<span><b>Critério de desempate</b> de qualquer prêmio: o <b>horário do check-in</b> — quem registrou primeiro leva.</span>, 9)}
-              {bullet(<span><b>Só valem aulas de BIKE.</b> Aulas da modalidade Strong não fazem parte do desafio e não são consideradas.</span>, 10)}
-              {bullet(<span><b>Desempate do desafio inteiro:</b> quem fechar primeiro as <b>4 vendas de pacote 10+ (4×10)</b> vence.</span>, 11)}
+              {bullet(<span><b>Desafio válido apenas para a modalidade de BIKE.</b> Aulas de <b>Strong Basics não valem como check-in</b> e não fazem parte do desafio.</span>, 10)}
+              {bullet(<span><b>Desempate do desafio inteiro:</b> a missão <b>⭐ Giro de 175 BPM</b> é o critério — <b>quanto mais rápido você completá-la, mais chance tem</b>. Quem fechar primeiro a cartela cheia + as 4 vendas de pacote 10+ leva.</span>, 11)}
               {bullet(
                 track === "ilimitado" ? (
                   <span><b>O que vale neste desafio:</b> as aulas do seu plano ilimitado (Spin Mensal, Spin Ilimitado ou Spin & Strong Ilimitado). O que conta é pedalar! 🚴</span>
@@ -4365,7 +4374,7 @@ export default function App() {
             {admin ? "Registrar aula (validada)" : "Registrar minha aula"}
           </div>
           <div style={{ color: C.mut, fontSize: 11.5, lineHeight: 1.5, marginBottom: 10 }}>
-            🚴 O check-in vale para as <b style={{ color: C.cream }}>aulas de BIKE</b>. Aulas da modalidade <b style={{ color: C.cream }}>Strong não fazem parte do desafio</b> e não são consideradas. Registre <b style={{ color: C.cream }}>somente após o fim da aula</b>.
+            🚴 O check-in vale <b style={{ color: C.cream }}>apenas para a modalidade de BIKE</b>. Aulas de <b style={{ color: C.cream }}>Strong Basics não valem como check-in</b> e não fazem parte do desafio. Registre <b style={{ color: C.cream }}>somente após o fim da aula</b>.
           </div>
           <div className="flex flex-col gap-2">
             <div className="flex gap-2">
@@ -4693,6 +4702,11 @@ export default function App() {
                       {r.alert ? "⚠️ verificar" : "pendente"}
                     </span>
                   )}
+                  {r.status === "pending" && !r.alert && r.correctedByStudent && !emEd && (
+                    <span className="rounded px-1.5 py-0.5 shrink-0" style={{ fontSize: 10, background: C.oak + "33", color: C.oak, fontWeight: 700 }}>
+                      ✎ corrigido
+                    </span>
+                  )}
                   {admin && r.status === "pending" && !emEd && confirmDel !== `hr:${r.id}` && (
                     <button
                       onClick={() => mutate((d) => {
@@ -4703,6 +4717,14 @@ export default function App() {
                       className="shrink-0" title={r.alert ? "Remover sinalização" : "Sinalizar incongruência"}
                       style={{ background: r.alert ? "#B15560" : "transparent", border: r.alert ? "none" : `1px solid ${C.line}`, borderRadius: 6, fontSize: 11, cursor: "pointer", padding: "2px 5px" }}
                     >⚠️</button>
+                  )}
+                  {admin && r.status === "pending" && r.alert && student.phone && !emEd && confirmDel !== `hr:${r.id}` && (
+                    <a
+                      href={`https://wa.me/55${normPhone(student.phone)}?text=${encodeURIComponent(`Oi ${student.name.split(" ")[0]}! Sua aula de ${fmtBR(r.date)} às ${r.slot.replace(":", "h")} está com informações incongruentes no nosso sistema. Dá uma olhadinha no seu painel do Desafio e corrige direto por lá — daí a gente valida rapidinho! 🙏`)}`}
+                      target="_blank" rel="noreferrer"
+                      className="shrink-0" title="Avisar aluno pelo WhatsApp"
+                      style={{ background: "transparent", border: `1px solid ${C.line}`, borderRadius: 6, fontSize: 11, textDecoration: "none", padding: "2px 5px", display: "inline-block" }}
+                    >📲</a>
                   )}
                   {admin && r.status === "pending" && !emEd && confirmDel !== `hr:${r.id}` && (
                     <button
@@ -4736,17 +4758,67 @@ export default function App() {
                   )}
                 </div>
                 {!admin && r.status === "pending" && r.alert && (
-                  <a
-                    href={`https://wa.me/${AJUDA_WHATSAPP}?text=${encodeURIComponent(`Oi! Gostaria de entender por que meu check-in de ${fmtBR(r.date)} às ${r.slot.replace(":", "h")} está pendente. Qual foi o erro, para que eu possa corrigir? 🙏 — ${student.name}`)}`}
-                    target="_blank" rel="noreferrer"
-                    className="block mt-2 rounded-lg px-3 py-2"
-                    style={{ background: "#B1556022", border: "1px solid #B15560", textDecoration: "none" }}
-                  >
-                    <div style={{ color: "#E8A0A8", fontSize: 11.5, lineHeight: 1.5 }}>
-                      ⚠️ Este check-in está pendente por alguma <b>incongruência na informação</b>.
-                      <span style={{ color: C.cream, fontWeight: 700 }}> Toque aqui</span> para falar com a recepção e corrigir. 💬
-                    </div>
-                  </a>
+                  <>
+                    <a
+                      href={`https://wa.me/${AJUDA_WHATSAPP}?text=${encodeURIComponent(`Oi! Gostaria de entender por que meu check-in de ${fmtBR(r.date)} às ${r.slot.replace(":", "h")} está pendente. Qual foi o erro, para que eu possa corrigir? 🙏`)}`}
+                      target="_blank" rel="noreferrer"
+                      className="block mt-2 rounded-lg px-3 py-2"
+                      style={{ background: "#B1556022", border: "1px solid #B15560", textDecoration: "none" }}
+                    >
+                      <div style={{ color: "#E8A0A8", fontSize: 11.5, lineHeight: 1.5 }}>
+                        ⚠️ Este check-in está pendente por alguma <b>incongruência na informação</b>.
+                        <span style={{ color: C.cream, fontWeight: 700 }}> Toque aqui</span> para falar com a recepção, ou corrija você mesmo(a) abaixo. 💬
+                      </div>
+                    </a>
+                    {!(selfEditH && selfEditH.id === r.id) ? (
+                      <button
+                        onClick={() => setSelfEditH({ id: r.id, date: r.date, slot: r.slot, instructor: r.instructor })}
+                        className="block w-full text-center mt-2 rounded-lg py-2 font-bold"
+                        style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.amberSoft, fontSize: 12.5 }}
+                      >
+                        ✏️ Corrigir data, horário ou professor
+                      </button>
+                    ) : (
+                      <div className="mt-2 flex flex-col gap-1.5">
+                        <div className="flex gap-1.5">
+                          <input type="date" value={selfEditH.date} min={DESAFIO_INICIO} max={todayStr()}
+                            onChange={(e) => {
+                              const nd = e.target.value;
+                              const vs = nd && isWeekendDate(nd) ? WEEKEND_SLOTS : WEEKDAY_SLOTS;
+                              setSelfEditH({ ...selfEditH, date: nd, slot: vs.includes(selfEditH.slot) ? selfEditH.slot : "" });
+                            }}
+                            className="flex-1 rounded px-2 py-1.5 outline-none"
+                            style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream, fontSize: 12, colorScheme: "dark" }} />
+                          <select value={selfEditH.slot} onChange={(e) => setSelfEditH({ ...selfEditH, slot: e.target.value })}
+                            className="rounded px-2 py-1.5 outline-none"
+                            style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: selfEditH.slot ? C.cream : C.mut, fontSize: 12 }}>
+                            <option value="" disabled>— horário —</option>
+                            {(selfEditH.date && isWeekendDate(selfEditH.date) ? WEEKEND_SLOTS : WEEKDAY_SLOTS).map((sl) => <option key={sl} value={sl}>{sl.replace(":", "h")}</option>)}
+                          </select>
+                        </div>
+                        <div className="flex gap-1.5">
+                          <select value={selfEditH.instructor} onChange={(e) => setSelfEditH({ ...selfEditH, instructor: e.target.value })}
+                            className="flex-1 rounded px-2 py-1.5 outline-none"
+                            style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream, fontSize: 12 }}>
+                            {INSTRUCTORS.map((i) => <option key={i} value={i}>{i}</option>)}
+                          </select>
+                          <button
+                            onClick={() => {
+                              if (!selfEditH.date || !selfEditH.slot) { avisar("Escolha data e horário."); return; }
+                              mutate((d) => {
+                                const s = d.students.find((x) => x.id === view);
+                                const rec = s && (s.records || []).find((x) => x.id === selfEditH.id);
+                                if (rec) { rec.date = selfEditH.date; rec.slot = selfEditH.slot; rec.instructor = selfEditH.instructor; rec.alert = false; rec.correctedByStudent = true; }
+                              });
+                              setSelfEditH(null);
+                              avisar("Correção enviada! A recepção vai validar em breve. 👍");
+                            }}
+                            className="rounded px-2.5 font-bold" style={{ background: C.ok, color: C.bg, fontSize: 12 }}>✓ salvar correção</button>
+                          <button onClick={() => setSelfEditH(null)} className="rounded px-2" style={{ color: C.mut, fontSize: 12, border: `1px solid ${C.line}` }}>✕</button>
+                        </div>
+                      </div>
+                    )}
+                  </>
                 )}
                 {emEd && (
                   <div className="mt-2 flex flex-col gap-1.5">
