@@ -482,24 +482,48 @@ function miniElegiveis(d, x) {
 }
 
 // ---------- Persistência (compartilhada entre todos) ----------
-const KEY_BASE = "spincycle-desafio-shared-v1";
+const KEY_BASE = "spincycle-desafio-shared-v2";
 const keyFor = (track) => `${KEY_BASE}-${track}`;
+const KEY_BASE_V1 = "spincycle-desafio-shared-v1";
+const keyForV1 = (track) => `${KEY_BASE_V1}-${track}`;
 const ADMIN_KEY = "spincycle-admin-device";
 const TRACK_PREF_KEY = "spincycle-track";
 async function loadData(track) {
   try {
     const res = await window.storage.get(keyFor(track), true);
-    return res ? JSON.parse(res.value) : { pin: null, students: [] };
+    if (res && res.value) return JSON.parse(res.value);
+    // Migração automática v1 → v2 (uma única vez, quando v2 ainda não existe)
+    try {
+      const old = await window.storage.get(keyForV1(track), true);
+      if (old && old.value) {
+        const d = JSON.parse(old.value);
+        if (d && Array.isArray(d.students) && d.students.length > 0) {
+          await window.storage.set(keyFor(track), old.value, true);
+          return d;
+        }
+      }
+    } catch { /* segue vazio */ }
+    return { pin: null, students: [] };
   } catch {
     return { pin: null, students: [] };
   }
 }
-const GLOBAL_KEY = "spincycle-desafio-shared-v1-global";
-const fotosKey = (t) => `spincycle-desafio-shared-v1-fotos-${t}`;
+const GLOBAL_KEY = "spincycle-desafio-shared-v2-global";
+const GLOBAL_KEY_V1 = "spincycle-desafio-shared-v1-global";
+const fotosKey = (t) => `spincycle-desafio-shared-v2-fotos-${t}`;
+const fotosKeyV1 = (t) => `spincycle-desafio-shared-v1-fotos-${t}`;
 async function loadGlobal() {
   try {
     const r = await window.storage.get(GLOBAL_KEY, true);
-    return r ? JSON.parse(r.value) : { miniMissions: [] };
+    if (r && r.value) return JSON.parse(r.value);
+    try {
+      const old = await window.storage.get(GLOBAL_KEY_V1, true);
+      if (old && old.value) {
+        await window.storage.set(GLOBAL_KEY, old.value, true);
+        return JSON.parse(old.value);
+      }
+    } catch { /* segue */ }
+    return { miniMissions: [] };
   } catch {
     return { miniMissions: [] };
   }
@@ -746,12 +770,15 @@ export default function App() {
   useEffect(() => {
     (async () => {
       const flag = await loadAdminFlag();
+      let ehAdmin = false;
       if (flag && flag.includes("|")) {
         const [fu, fp] = flag.split("|");
-        if (ADMINS[fu] && ADMINS[fu] === fp) { setAdmin(true); setAdminUser(fu); }
+        if (ADMINS[fu] && ADMINS[fu] === fp) { setAdmin(true); setAdminUser(fu); ehAdmin = true; }
       }
-      const saved = await loadTrackPref();
-      if (saved && TRACKS.some((t) => t.id === saved)) setTrack(saved);
+      if (!ehAdmin) {
+        const saved = await loadTrackPref();
+        if (saved && TRACKS.some((t) => t.id === saved)) setTrack(saved);
+      }
       setTrackLoaded(true);
     })();
     loadUnlocks().then(setUnlocks);
@@ -773,7 +800,16 @@ export default function App() {
       const g = await loadGlobal();
       if (alive) setGData(g);
       try {
-        const rf = await window.storage.get(fotosKey(track), true);
+        let rf = await window.storage.get(fotosKey(track), true);
+        if (!rf || !rf.value) {
+          try {
+            const oldF = await window.storage.get(fotosKeyV1(track), true);
+            if (oldF && oldF.value) {
+              await window.storage.set(fotosKey(track), oldF.value, true);
+              rf = oldF;
+            }
+          } catch { /* segue */ }
+        }
         if (alive) setPhotos(rf && rf.value ? JSON.parse(rf.value) : {});
       } catch { if (alive) setPhotos({}); }
     })();
