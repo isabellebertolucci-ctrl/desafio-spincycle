@@ -1603,13 +1603,34 @@ export default function App() {
                         </button>
                       </div>
                     )}
-                    {ativa && (
-                      <button
-                        onClick={() => doMiniAt(x, tid)((d) => { const xx = (d.miniMissions || []).find((y) => y.id === x.id); if (xx) { xx.endTs = Date.now() - 1000; xx.end = "2000-01-01"; } })}
-                        className="mt-2 rounded-lg px-2 py-1" title="Encerrar missão" style={{ border: `1px solid ${C.line}`, color: C.mut, fontSize: 11 }}>
-                        ✕ Encerrar missão sem premiar o restante
-                      </button>
-                    )}
+                    <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+                      {ativa && (
+                        <button
+                          onClick={() => doMiniAt(x, tid)((d) => { const xx = (d.miniMissions || []).find((y) => y.id === x.id); if (xx) { xx.endTs = Date.now() - 1000; xx.end = "2000-01-01"; } })}
+                          className="rounded-lg px-2 py-1" title="Encerrar missão" style={{ border: `1px solid ${C.line}`, color: C.mut, fontSize: 11 }}>
+                          ✕ Encerrar sem premiar o restante
+                        </button>
+                      )}
+                      {confirmDel !== `mm:${x.id}:${tid || "g"}` ? (
+                        <button
+                          onClick={() => setConfirmDel(`mm:${x.id}:${tid || "g"}`)}
+                          className="rounded-lg px-2 py-1" title="Excluir missão e suas medalhas"
+                          style={{ border: `1px solid #B1556066`, color: "#C96A76", fontSize: 11 }}>
+                          🗑 Excluir missão
+                        </button>
+                      ) : (
+                        <div className="flex items-center gap-1">
+                          <span style={{ color: "#C96A76", fontSize: 10, fontWeight: 700 }}>Apaga a missão e as medalhas — Irreversível!</span>
+                          <button
+                            onClick={() => {
+                              doMiniAt(x, tid)((d) => { d.miniMissions = (d.miniMissions || []).filter((y) => y.id !== x.id); });
+                              setConfirmDel("");
+                            }}
+                            className="rounded px-1.5 py-0.5 font-bold" style={{ background: "#B15560", color: C.cream, fontSize: 10 }}>SIM</button>
+                          <button onClick={() => setConfirmDel("")} className="rounded px-1.5 py-0.5" style={{ color: C.mut, fontSize: 10, border: `1px solid ${C.line}` }}>não</button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 );
               })}
