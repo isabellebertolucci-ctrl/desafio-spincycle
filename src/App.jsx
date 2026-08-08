@@ -756,6 +756,11 @@ export default function App() {
   const [showMM, setShowMM] = useState(false);
   const [showRel, setShowRel] = useState(false);
   const [showWins, setShowWins] = useState(false);
+  const [showPremios, setShowPremios] = useState(false);
+  const [premiosData, setPremiosData] = useState(null);
+  const [premiosLoading, setPremiosLoading] = useState(false);
+  const [premiosExpanded, setPremiosExpanded] = useState(null);
+  const [confirmDelP, setConfirmDelP] = useState(null);
   const [impRes, setImpRes] = useState(null);
   const bootView = useRef(false);
   const [obsDraft, setObsDraft] = useState("");
@@ -1317,6 +1322,31 @@ export default function App() {
                             )}
                             {!editando && (
                               <button onClick={() => validarItem(t.id, s.id, tipo, it.id)} className="rounded px-2.5 py-1 font-bold shrink-0" style={{ background: C.ok, color: C.bg, fontSize: 12 }}>✓</button>
+                            )}
+                            {!editando && confirmDelP !== `pnd:${it.id}` && (
+                              <button
+                                onClick={() => setConfirmDelP(`pnd:${it.id}`)}
+                                className="shrink-0" title="Apagar esta pendência"
+                                style={{ background: "transparent", border: "none", color: C.mut, fontSize: 13, cursor: "pointer" }}
+                              >✕</button>
+                            )}
+                            {!editando && confirmDelP === `pnd:${it.id}` && (
+                              <div className="shrink-0 flex items-center gap-1">
+                                <span style={{ color: "#C96A76", fontSize: 9, fontWeight: 700 }}>Apagar?</span>
+                                <button
+                                  onClick={() => {
+                                    mutateTrack(t.id, (d) => {
+                                      const s2 = d.students.find((x) => x.id === s.id);
+                                      if (!s2) return;
+                                      if (tipo === "rec") s2.records = (s2.records || []).filter((x) => x.id !== it.id);
+                                      else s2.guests = (s2.guests || []).filter((x) => x.id !== it.id);
+                                    });
+                                    setConfirmDelP(null);
+                                  }}
+                                  className="rounded px-1.5 py-0.5 font-bold"
+                                  style={{ background: "#B15560", color: C.cream, fontSize: 10 }}>SIM</button>
+                                <button onClick={() => setConfirmDelP(null)} className="rounded px-1.5 py-0.5" style={{ color: C.mut, fontSize: 10, border: `1px solid ${C.line}` }}>não</button>
+                              </div>
                             )}
                           </div>
                           {editando && (
@@ -2476,7 +2506,175 @@ export default function App() {
               🏅 ÚLTIMAS E PRÓXIMAS CONQUISTAS
             </button>
           )}
+          <button
+            onClick={() => {
+              setShowPremios(true);
+              if (!premiosData) {
+                setPremiosLoading(true);
+                (async () => {
+                  const out = {};
+                  for (const t of TRACKS) {
+                    try { out[t.id] = await loadData(t.id); } catch { out[t.id] = null; }
+                  }
+                  let gl = { miniMissions: [] };
+                  try { gl = await loadGlobal(); } catch { /* ok */ }
+                  out._global = gl;
+                  setPremiosData(out);
+                  setPremiosLoading(false);
+                })();
+              }
+              window.scrollTo({ top: 0 });
+            }}
+            className="w-full rounded-lg px-3 py-2.5 mt-3 text-center font-bold"
+            style={{ background: C.panel, color: C.ok, fontSize: 13, border: `1px solid ${C.ok}44` }}
+          >
+            🏆 MISSÕES CONCLUÍDAS → ver prêmios e colocações
+          </button>
           {footerNote}
+        </main>
+      </div>
+    );
+  }
+
+  // ---------- Página pública: Missões e Prêmios Concluídos ----------
+  if (showPremios) {
+    const PATL = {
+      horiz: { label: "Linha Horizontal", prize: "Camiseta Spincycle", emoji: "👕" },
+      vert:  { label: "Linha Vertical",   prize: "Camiseta Spincycle", emoji: "👕" },
+      diag:  { label: "Diagonal",         prize: "Camiseta Spincycle", emoji: "👕" },
+      corners:{ label: "4 Cantos",        prize: "Bolsinha Spincycle", emoji: "👜" },
+      conv:  { label: "4 Conversões",     prize: "Aula temática à escolha", emoji: "🎯" },
+      full:  { label: "Cartela Cheia",    prize: "Treinamento + 1 mês ilimitado", emoji: "🏆" },
+      bpm:   { label: "Giro de 175 BPM", prize: "Aula fechada para 33 convidados", emoji: "⭐" },
+    };
+    const grupos = [];
+    if (!premiosLoading && premiosData) {
+      TRACKS.forEach((t) => {
+        const d = premiosData[t.id]; if (!d) return;
+        const M = TRACK_MISSIONS[t.id];
+        const w = d.winners || {};
+        // Shakes por missão
+        M.forEach((m) => {
+          const q = (w.missionQueues || {})[m.id] || [];
+          if (q.length === 0) return;
+          const id = `shake-${t.id}-${m.id}`;
+          grupos.push({
+            id, emoji: "🥤", label: `Shake — ${m.name}`, prize: "Shake do mês", grupo: t.short,
+            lista: q.map((e, i) => ({ pos: i + 1, nome: e.name, ts: e.ts, date: e.date })),
+          });
+        });
+        // Padrões
+        Object.entries(PATL).forEach(([k, info]) => {
+          const arr = (w.placements || {})[k] || [];
+          if (arr.length === 0) return;
+          grupos.push({
+            id: `pat-${t.id}-${k}`, emoji: info.emoji, label: info.label, prize: info.prize, grupo: t.short,
+            lista: arr.map((e, i) => ({ pos: i + 1, nome: e.name, ts: e.ts, date: e.date })),
+          });
+        });
+      });
+      // Relâmpagos globais e por grupo
+      const minis = [
+        ...((premiosData._global || {}).miniMissions || []).map((x) => ({ x, gr: "🌍 Todos" })),
+        ...TRACKS.flatMap((t) => ((premiosData[t.id] || {}).miniMissions || []).map((x) => ({ x, gr: t.short }))),
+      ];
+      minis.forEach(({ x, gr }) => {
+        const ws = (x.winners || []);
+        if (ws.length === 0) return;
+        grupos.push({
+          id: `mini-${x.id}`, emoji: "⚡", label: x.name, prize: x.prize || "prêmio relâmpago", grupo: gr,
+          lista: ws.map((e, i) => ({ pos: i + 1, nome: e.name, ts: e.ts })),
+        });
+      });
+    }
+    return (
+      <div className="min-h-screen" style={{ ...pageVars, background: pageBg, fontFamily: "'Montserrat', sans-serif", transition: "background .4s" }}>
+        {fonts}{modal}
+        <main className="max-w-md mx-auto px-5 pb-16 pt-6">
+          <div className="flex items-center justify-between">
+            <button onClick={() => { setShowPremios(false); setPremiosExpanded(null); }} style={{ color: C.oak, fontSize: 13 }}>← Voltar</button>
+            {lockBtn}
+          </div>
+          <h2 className="mt-4 mb-1" style={{ fontWeight: 800, fontSize: 22, color: C.amber, textTransform: "uppercase", letterSpacing: "0.03em" }}>
+            🏆 Missões Concluídas
+          </h2>
+          <div style={{ color: C.mut, fontSize: 12, marginBottom: 12 }}>
+            Prêmios já conquistados — toque em qualquer um para ver a colocação completa.
+          </div>
+
+          {premiosLoading && (
+            <div className="text-center py-10" style={{ color: C.mut, fontSize: 13 }}>carregando prêmios…</div>
+          )}
+
+          {!premiosLoading && grupos.length === 0 && (
+            <div className="text-center py-10 rounded-xl" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.mut, fontSize: 13 }}>
+              Nenhum prêmio conquistado ainda — o desafio está apenas começando! 🚴‍♀️
+            </div>
+          )}
+
+          {!premiosLoading && grupos.length > 0 && (
+            <div className="flex flex-col gap-2">
+              {grupos.map((g) => {
+                const aberto = premiosExpanded === g.id;
+                const primeiro = g.lista[0];
+                return (
+                  <div key={g.id} className="rounded-xl overflow-hidden" style={{ background: C.panel, border: `1px solid ${aberto ? C.amber + "77" : C.line}` }}>
+                    <button
+                      className="w-full px-4 py-3 text-left flex items-center gap-3"
+                      onClick={() => setPremiosExpanded(aberto ? null : g.id)}
+                      style={{ background: "transparent", border: "none", cursor: "pointer" }}
+                    >
+                      <span style={{ fontSize: 22, lineHeight: 1 }}>{g.emoji}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span style={{ color: C.cream, fontWeight: 800, fontSize: 13 }}>{g.label}</span>
+                          <span className="rounded px-1.5 py-0.5" style={{ fontSize: 9.5, background: C.wineDeep, color: C.oak, fontFamily: "'DM Mono', monospace", letterSpacing: "0.1em" }}>
+                            {g.grupo}
+                          </span>
+                        </div>
+                        <div style={{ color: C.mut, fontSize: 11, marginTop: 2 }}>{g.prize}</div>
+                        {primeiro && (
+                          <div style={{ color: C.ok, fontSize: 11.5, marginTop: 3, fontWeight: 700 }}>
+                            🥇 {primeiro.nome}
+                            {primeiro.ts ? <span style={{ color: C.mut, fontWeight: 400 }}> · {fmtDT(primeiro.ts)}</span> : primeiro.date ? <span style={{ color: C.mut, fontWeight: 400 }}> · {fmtBR(primeiro.date)}</span> : ""}
+                            {g.lista.length > 1 && <span style={{ color: C.mut, fontWeight: 400 }}> +{g.lista.length - 1} mais</span>}
+                          </div>
+                        )}
+                      </div>
+                      <span style={{ color: C.mut, fontSize: 16 }}>{aberto ? "▲" : "▼"}</span>
+                    </button>
+
+                    {aberto && (
+                      <div className="px-4 pb-3 flex flex-col gap-1.5">
+                        <div style={{ height: 1, background: C.line, marginBottom: 6 }} />
+                        {g.lista.map((e) => (
+                          <div key={e.pos} className="flex items-center gap-3 rounded-lg px-3 py-2" style={{ background: C.panelSoft }}>
+                            <div style={{
+                              width: 28, height: 28, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center",
+                              fontWeight: 800, fontSize: 13, flexShrink: 0,
+                              background: e.pos === 1 ? "#B8860B" : e.pos === 2 ? "#888" : e.pos === 3 ? "#7B5B3A" : C.wineDeep,
+                              color: e.pos <= 3 ? "#FFF" : C.mut,
+                            }}>
+                              {e.pos === 1 ? "🥇" : e.pos === 2 ? "🥈" : e.pos === 3 ? "🥉" : e.pos}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="truncate" style={{ color: C.cream, fontWeight: 700, fontSize: 13 }}>{e.nome}</div>
+                              <div style={{ color: C.mut, fontSize: 11, fontFamily: "'DM Mono', monospace" }}>
+                                {e.ts ? fmtDT(e.ts) : e.date ? fmtBR(e.date) : "—"}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {footerNote}
+          <div className="flex justify-center pb-8">{helpBtn}</div>
         </main>
       </div>
     );
