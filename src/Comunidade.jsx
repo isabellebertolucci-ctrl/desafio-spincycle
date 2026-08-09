@@ -1082,7 +1082,7 @@ function lerImagem(f, cb, maxLado = 640) {
 }
 
 // ---------- Login ----------
-function TelaLogin({ allData, carregando, onEntrar, entrarDemo, onParceiro }) {
+function TelaLogin({ allData, carregando, onEntrar, entrarDemo, onParceiro, adminLiberado, entrarStaff }) {
   const [nome, setNome] = useState("");
   const [senha, setSenha] = useState("");
   const [erro, setErro] = useState("");
@@ -1328,7 +1328,7 @@ export default function App() {
   useEffect(() => {
     (async () => {
       const s = await lerLocal(K_SESSAO);
-      if (s && s.sid) { setSessao(s); metrBuf.current.entradas += 1; metrBuf.current.sujo = true; }
+      if (s && s.sid) { setSessao(s); if (!s.staff) { metrBuf.current.entradas += 1; metrBuf.current.sujo = true; } }
       const pj = await lerLocal(K_PARCEIRO);
       if (pj && pj.id) setParceiro(pj);
       const flag = await lerLocal(K_ADMIN);
@@ -1386,7 +1386,7 @@ export default function App() {
 
   const batimentoPresenca = async () => {
     const s = sessaoRef.current;
-    if (!s || demoRef.current) return;
+    if (!s || s.staff || demoRef.current) return;
     try {
       const raw = await window.storage.get(K.presenca, true).catch(() => null);
       const mapa = raw ? JSON.parse(raw.value) : {};
@@ -1538,8 +1538,10 @@ export default function App() {
   // ---------- Sessões ----------
   const entrar = async (s) => {
     setSessao(s);
-    metrBuf.current.entradas += 1;
-    metrBuf.current.sujo = true;
+    if (!s.staff) {
+      metrBuf.current.entradas += 1;
+      metrBuf.current.sujo = true;
+    }
     await gravarLocal(K_SESSAO, s);
     avisar(`Bem-vinda(o), ${firstName(s.name)}! 🐻`);
   };
@@ -1573,7 +1575,7 @@ export default function App() {
   const descarregarMetricas = async () => {
     const b = metrBuf.current;
     const s = sessaoRef.current;
-    if (!s || !b.sujo) return;
+    if (!s || s.staff || !b.sujo) return;
     b.min += 2; // intervalo do flush ≈ tempo ativo aproximado
     const meu = `${s.track}:${s.sid}`;
     const aplicar = (base) => {
@@ -2057,6 +2059,13 @@ export default function App() {
   const minhaFoto = sessao ? fotos[minhaChave] : null;
   const adminSuper = !!(adminInfo && adminInfo.super);
   const adminPerms = (adminInfo && adminInfo.perms) || {};
+  const clubeAcesso = {
+    ver: gestorClube || adminSuper || !!adminPerms.clubeVer || !!adminPerms.clubeEditar || !!adminPerms.clubeValores || !!adminPerms.clubeCampanha || !!adminPerms.clubePagamentos,
+    valores: gestorClube || adminSuper || !!adminPerms.clubeValores,
+    editar: gestorClube || adminSuper || !!adminPerms.clubeEditar,
+    campanha: gestorClube || adminSuper || !!adminPerms.clubeCampanha,
+    pagamentos: gestorClube || adminSuper || !!adminPerms.clubePagamentos,
+  };
 
   const minhaTorcidaSet = new Set(Object.keys(torcida).filter((alvo) => (torcida[alvo] || []).includes(minhaChave)));
   const nomeDaChave = (chave) => {
@@ -2170,6 +2179,8 @@ export default function App() {
   if (!sessao) {
     return shell(
       <TelaLogin allData={allData} carregando={carregando} onEntrar={entrar}
+        adminLiberado={admin}
+        entrarStaff={() => entrar({ track: "staff", sid: "gestao", name: "Administração", staff: true })}
         entrarDemo={bancoVazio ? entrarDemo : null} onParceiro={entrarParceiro} />,
       true
     );
@@ -2179,7 +2190,7 @@ export default function App() {
   const telaInicio = (
     <>
       <div style={{ display: "flex", gap: 16, alignItems: "flex-start", marginTop: 8 }}>
-        <div style={{ position: "relative", cursor: "pointer" }} onClick={() => abrirPerfilAluno(sessao.track, sessao.sid)}>
+        <div style={{ position: "relative", cursor: "pointer" }} onClick={() => sessao.staff ? setTela("painel") : abrirPerfilAluno(sessao.track, sessao.sid)}>
           <Avatar foto={minhaFoto} nome={sessao.name} size={92} />
           <button onClick={(ev) => { ev.stopPropagation(); setTela("perfil"); }} style={{
             position: "absolute", bottom: -2, right: -2, width: 30, height: 30, borderRadius: "50%",
@@ -2390,13 +2401,6 @@ export default function App() {
       acessoDireto={clubeAcesso.ver}
       voltar={() => { setClubeFoco(null); setTela("inicio"); }} />
   );
-  const clubeAcesso = {
-    ver: gestorClube || adminSuper || !!adminPerms.clubeVer || !!adminPerms.clubeEditar || !!adminPerms.clubeValores || !!adminPerms.clubeCampanha || !!adminPerms.clubePagamentos,
-    valores: gestorClube || adminSuper || !!adminPerms.clubeValores,
-    editar: gestorClube || adminSuper || !!adminPerms.clubeEditar,
-    campanha: gestorClube || adminSuper || !!adminPerms.clubeCampanha,
-    pagamentos: gestorClube || adminSuper || !!adminPerms.clubePagamentos,
-  };
   const telaCadastroClube = (
     <CadastroClube clube={clube} salvarClube={salvarClube} removerParceiro={removerParceiro}
       lancarCampanha={lancarCampanha} metricas={metricas} acesso={clubeAcesso} voltar={() => setTela("clube")} />
