@@ -57,7 +57,7 @@ const missionDesc = (id, n) => ({
   dobra: n === 1 ? "2 aulas seguidas no mesmo dia (1 vez)" : `2 aulas seguidas no mesmo dia, em ${n} dias diferentes`,
   madruga: `${n} aulas das 6h15`,
   maratona: `Treinar em ${n} dias diferentes`,
-  semana: n === 7 ? "Treinar todos os dias, de segunda a domingo" : `Treinar ${n} dias na mesma semana (seg a dom)`,
+  semana: `Treinar ${n} dias seguidos, sem falhar nenhum (a sequência pode começar em qualquer dia)`,
   zona: `Aulas com ${n} professores diferentes`,
   fds: `Treinar ${n} finais de semana seguidos`,
   giro: `Fazer aula em ${n} horários diferentes da grade (vale fim de semana)`,
@@ -132,9 +132,18 @@ function computeProgress(student) {
   p.madruga = recs.filter((r) => r.slot === "06:15").length;
 
   const dates = [...new Set(recs.map((r) => r.date))].sort();
-  const byWeek = {};
-  dates.forEach((d) => { (byWeek[mondayOf(d)] = byWeek[mondayOf(d)] || new Set()).add(dayIndex(d)); });
-  p.semana = Object.values(byWeek).reduce((m, s) => Math.max(m, s.size), 0);
+  // Semana Perfeita: maior sequência de dias CORRIDOS (não depende do calendário).
+  // Treinar de quinta a quarta vale igual a treinar de segunda a domingo.
+  {
+    const idx = dates.map(dayIndex).sort((a, b) => a - b);
+    let melhor = idx.length ? 1 : 0;
+    let corrida = idx.length ? 1 : 0;
+    for (let i = 1; i < idx.length; i++) {
+      corrida = idx[i] === idx[i - 1] + 1 ? corrida + 1 : 1;
+      if (corrida > melhor) melhor = corrida;
+    }
+    p.semana = melhor;
+  }
 
   const gok = (student.guests || []).filter((g) => g.status === "ok");
   p.amigo = gok.filter((g) => g.kind !== "spin").length + Math.min(2, gok.filter((g) => g.kind === "spin").length);
@@ -194,11 +203,17 @@ function missionCompletionDates(student) {
 
   if (sortedDates.length >= T.maratona) out.maratona = sortedDates[T.maratona - 1];
 
-  const byWeek = {};
-  sortedDates.forEach((d) => { const w = mondayOf(d); (byWeek[w] = byWeek[w] || []).push(d); });
-  for (const w of Object.keys(byWeek).map(Number).sort((a, b) => a - b)) {
-    const days = [...new Set(byWeek[w])].sort();
-    if (days.length >= T.semana) { out.semana = days[T.semana - 1]; break; }
+  // Semana Perfeita: dia em que completou N dias CORRIDOS de treino
+  {
+    const unicos = [...new Set(sortedDates)].sort();
+    let corrida = 0;
+    let anterior = null;
+    for (const d of unicos) {
+      const i = dayIndex(d);
+      corrida = (anterior !== null && i === anterior + 1) ? corrida + 1 : 1;
+      anterior = i;
+      if (corrida >= T.semana) { out.semana = d; break; }
+    }
   }
 
   const seen = new Set();
@@ -533,9 +548,26 @@ function corrigirIdsDuplicados(d) {
 // Avisa a interface que houve uma restauração automática
 let onAutoRestore = null;
 
-// Recupera do cofre quando o banco aparece vazio ou muito menor que o esperado
+// Busca a versão antiga (v1) — em alguns grupos a migração v1→v2 nunca chegou
+// a acontecer porque a v2 já existia, e alunos ficaram presos na v1.
+async function alunosDaV1(track) {
+  try {
+    const r = await window.storage.get(keyForV1(track), true);
+    if (!r || !r.value) return null;
+    const d = JSON.parse(r.value);
+    if (d && Array.isArray(d.students) && d.students.length > 0) return d;
+  } catch { /* sem v1 */ }
+  return null;
+}
+
+// Recupera do cofre — e também da v1 — quando o banco aparece vazio ou menor que o esperado
 async function tentarAutoRestauracao(track, atual, motivo) {
-  const melhor = await melhorSnapshot(track);
+  let melhor = await melhorSnapshot(track);
+  // A v1 também conta como fonte de recuperação
+  const v1 = await alunosDaV1(track);
+  if (v1 && (!melhor || v1.students.length > melhor.alunos)) {
+    melhor = { data: v1, alunos: v1.students.length, ts: 0, slot: "v1" };
+  }
   if (!melhor || melhor.alunos === 0) return null;
   const qtdAtual = atual && Array.isArray(atual.students) ? atual.students.length : 0;
   if (melhor.alunos <= qtdAtual) return null;
@@ -570,6 +602,35 @@ async function loadData(track) {
           const rec = await tentarAutoRestauracao(track, d, "banco vazio");
           if (rec) return rec;
         }
+        // Vigia: a v1 tem alunos que não estão na v2? Traz de volta (mescla, não substitui)
+        try {
+          const v1 = await alunosDaV1(track);
+          if (v1) {
+            const idsV2 = new Set(d.students.map((s) => s.id));
+            const faltando = v1.students.filter((s) => s && !idsV2.has(s.id));
+            if (faltando.length > 0) {
+              console.error(`[RESGATE-V1] ${track}: ${faltando.length} aluno(s) só existiam na versão antiga. Trazendo de volta…`);
+              faltando.forEach((s) => d.students.push(s));
+              // Preserva prêmios já registrados na v1 que não estejam na v2
+              const w1 = v1.winners || {};
+              d.winners = d.winners || {};
+              ["missions", "patterns", "placements", "missionQueues"].forEach((sec) => {
+                if (!w1[sec]) return;
+                d.winners[sec] = d.winners[sec] || {};
+                Object.keys(w1[sec]).forEach((k) => {
+                  if (d.winners[sec][k] === undefined) d.winners[sec][k] = w1[sec][k];
+                });
+              });
+              d.rev = (d.rev || 0) + 1;
+              d.savedAt = Date.now();
+              try {
+                await window.storage.set(keyFor(track), JSON.stringify(d), true);
+                if (onAutoRestore) onAutoRestore(track + ":v1", 0, faltando.length);
+              } catch { /* segue com a correção em memória */ }
+            }
+          }
+        } catch { /* resgate é melhor esforço */ }
+
         // Conserta ids repetidos (alunos que existem no banco mas somem da tela)
         const corrigidos = corrigirIdsDuplicados(d);
         if (corrigidos > 0) {
@@ -860,6 +921,41 @@ async function loadTrackPref() {
 async function saveTrackPref(t) {
   try { await window.storage.set(TRACK_PREF_KEY, t, false); } catch { /* ok */ }
 }
+// ---------- Registro de uso (chave separada: nunca toca nos dados dos alunos) ----------
+const USO_KEY = `${KEY_BASE}-uso`;
+
+async function loadUso() {
+  try {
+    const r = await window.storage.get(USO_KEY, true);
+    if (r && r.value) {
+      const u = JSON.parse(r.value);
+      if (u && typeof u === "object") return u;
+    }
+  } catch { /* sem registro ainda */ }
+  return {};
+}
+
+// Grava o "ping" de uma pessoa. Nunca apaga o histórico de ninguém:
+// só acrescenta/atualiza a entrada dela.
+async function registrarUso(sid, nome, track, tela) {
+  if (!sid) return;
+  try {
+    const atual = await loadUso();
+    const agora = Date.now();
+    const e = atual[sid] || { nome, track, sessoes: 0, minutos: 0, telas: {}, primeiro: agora, ultimo: 0 };
+    e.nome = nome || e.nome;
+    e.track = track || e.track;
+    // Sessão nova quando ficou mais de 30 min sem aparecer
+    const gap = agora - (e.ultimo || 0);
+    if (gap > 30 * 60000) e.sessoes = (e.sessoes || 0) + 1;
+    else e.minutos = Math.round(((e.minutos || 0) + gap / 60000) * 10) / 10;
+    if (tela) e.telas[tela] = (e.telas[tela] || 0) + 1;
+    e.ultimo = agora;
+    atual[sid] = e;
+    await window.storage.set(USO_KEY, JSON.stringify(atual), true);
+  } catch { /* registro de uso é melhor esforço — nunca atrapalha o app */ }
+}
+
 async function loadAdminFlag() {
   try {
     const res = await window.storage.get(ADMIN_KEY, false);
@@ -1067,6 +1163,14 @@ export default function App() {
   const [showMM, setShowMM] = useState(false);
   const [showRel, setShowRel] = useState(false);
   const [showWins, setShowWins] = useState(false);
+  const [novoCad, setNovoCad] = useState(null);
+  const [premiosTrack, setPremiosTrack] = useState(null);
+  const [showUso, setShowUso] = useState(false);
+  const [usoData, setUsoData] = useState(null);
+  const [usoLoading, setUsoLoading] = useState(false);
+  const [usoOrdem, setUsoOrdem] = useState("recente");
+  const [filtroDesemp, setFiltroDesemp] = useState("quase");
+  const [buscaDesemp, setBuscaDesemp] = useState("");
   const [showPremios, setShowPremios] = useState(false);
   const [premiosData, setPremiosData] = useState(null);
   const [premiosLoading, setPremiosLoading] = useState(false);
@@ -1084,9 +1188,69 @@ export default function App() {
   const [recErr, setRecErr] = useState("");
   const [qErr, setQErr] = useState("");
 
+  // Arrastar pra baixo no topo da página → recarrega
+  const [puxando, setPuxando] = useState(0);
+  const puxandoRef = useRef(0);
+  useEffect(() => { puxandoRef.current = puxando; }, [puxando]);
+  useEffect(() => {
+    let y0 = null;
+    let ativo = false;
+    const inicio = (e) => {
+      if (window.scrollY > 4) { y0 = null; return; }
+      y0 = e.touches[0].clientY;
+      ativo = true;
+    };
+    const mover = (e) => {
+      if (!ativo || y0 === null) return;
+      const dy = e.touches[0].clientY - y0;
+      if (dy > 0 && window.scrollY <= 4) {
+        setPuxando(Math.min(dy, 110));
+      } else {
+        setPuxando(0);
+      }
+    };
+    const soltar = () => {
+      if (puxandoRef.current >= 70) window.location.reload();
+      setPuxando(0);
+      ativo = false; y0 = null;
+    };
+    window.addEventListener("touchstart", inicio, { passive: true });
+    window.addEventListener("touchmove", mover, { passive: true });
+    window.addEventListener("touchend", soltar, { passive: true });
+    return () => {
+      window.removeEventListener("touchstart", inicio);
+      window.removeEventListener("touchmove", mover);
+      window.removeEventListener("touchend", soltar);
+    };
+  }, []);
+
+  // Registra o uso a cada 2 minutos enquanto a cartela está aberta.
+  // Fica numa chave separada — não encosta nos dados dos alunos.
+  const telaAtual = () =>
+    showPend ? "pendencias" : showCad ? "cadastros" : showMM ? "relampago"
+    : showRel ? "relatorio" : showWins ? "desempenho" : showPremios ? "premios"
+    : showManual ? "manual" : showUso ? "uso" : view ? "cartela" : "inicio";
+
+  useEffect(() => {
+    if (!view || admin) return;
+    const s = (data && data.students) ? data.students.find((x) => x.id === view) : null;
+    if (!s) return;
+    registrarUso(view, s.name, track, telaAtual());
+    const t = setInterval(() => {
+      registrarUso(view, s.name, track, telaAtual());
+    }, 120000);
+    return () => clearInterval(t);
+  }, [view, admin, track]);
+
   // Liga o aviso de auto-restauração à interface
   useEffect(() => {
     onAutoRestore = (tid, de, para) => {
+      if (typeof tid === "string" && tid.endsWith(":v1")) {
+        const t0 = tid.replace(":v1", "");
+        const n0 = (TRACKS.find((t) => t.id === t0) || {}).short || t0;
+        avisar(`🔁 ${n0}: ${para} aluno(s) resgatado(s) da versão antiga do banco — já aparecem na lista.`);
+        return;
+      }
       if (typeof tid === "string" && tid.endsWith(":ids")) {
         const t0 = tid.replace(":ids", "");
         const n0 = (TRACKS.find((t) => t.id === t0) || {}).short || t0;
@@ -1101,20 +1265,29 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
-      const flag = await loadAdminFlag();
-      let ehAdmin = false;
-      if (flag && flag.includes("|")) {
-        const [fu, fp] = flag.split("|");
-        if (ADMINS[fu] && ADMINS[fu] === fp) { setAdmin(true); setAdminUser(fu); ehAdmin = true; }
+      try {
+        const flag = await loadAdminFlag();
+        let ehAdmin = false;
+        if (flag && flag.includes("|")) {
+          const [fu, fp] = flag.split("|");
+          if (ADMINS[fu] && ADMINS[fu] === fp) { setAdmin(true); setAdminUser(fu); ehAdmin = true; }
+        }
+        if (!ehAdmin) {
+          const saved = await loadTrackPref();
+          if (saved && TRACKS.some((t) => t.id === saved)) setTrack(saved);
+        }
+      } catch (e) {
+        console.error("[BOOT] falha ao carregar preferências:", e);
+      } finally {
+        // Aconteça o que acontecer, a tela SAI do "Carregando…"
+        setTrackLoaded(true);
       }
-      if (!ehAdmin) {
-        const saved = await loadTrackPref();
-        if (saved && TRACKS.some((t) => t.id === saved)) setTrack(saved);
-      }
-      setTrackLoaded(true);
     })();
-    loadUnlocks().then(setUnlocks);
-    loadMyIds().then(setMyIds);
+    // Rede de segurança: se em 8s nada resolveu, libera a tela mesmo assim
+    const destravar = setTimeout(() => setTrackLoaded(true), 8000);
+    loadUnlocks().then(setUnlocks).catch(() => {});
+    loadMyIds().then(setMyIds).catch(() => {});
+    return () => clearTimeout(destravar);
   }, []);
 
   useEffect(() => {
@@ -1499,6 +1672,11 @@ export default function App() {
   const fonts = (
     <>
       <style>{"@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&family=DM+Mono:wght@400;500&display=swap'); html, body { overscroll-behavior-y: none; } body { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }"}</style>
+      {puxando > 0 && (
+        <div style={{ position: "fixed", top: Math.min(puxando * 0.5, 46), left: "50%", transform: "translateX(-50%)", zIndex: 9997, background: C.panel, border: `1px solid ${C.line}`, color: puxando >= 70 ? C.ok : C.mut, padding: "6px 14px", borderRadius: 999, fontSize: 11.5, fontWeight: 700, pointerEvents: "none", transition: "color .15s" }}>
+          {puxando >= 70 ? "↻ solte para atualizar" : "↓ puxe para atualizar"}
+        </div>
+      )}
       {syncMsg && (
         <div style={{ position: "fixed", top: 10, left: "50%", transform: "translateX(-50%)", zIndex: 9999, background: "#B15560", color: "#fff", padding: "10px 16px", borderRadius: 10, fontSize: 13, fontWeight: 700, maxWidth: "92%", textAlign: "center", boxShadow: "0 4px 20px rgba(0,0,0,.5)" }}>
           {syncMsg}
@@ -1525,8 +1703,21 @@ export default function App() {
 
   if (!trackLoaded) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ "--panel": "rgba(255,255,255,0.05)", "--panelSoft": "rgba(255,255,255,0.09)", "--line": "rgba(255,255,255,0.14)", background: C.bg, color: C.mut }}>
-        Carregando…
+      <div className="min-h-screen flex flex-col items-center justify-center px-6" style={{ "--panel": "rgba(255,255,255,0.05)", "--panelSoft": "rgba(255,255,255,0.09)", "--line": "rgba(255,255,255,0.14)", background: C.bg, color: C.mut, fontFamily: "'Montserrat', sans-serif" }}>
+        <div style={{ fontSize: 15 }}>Carregando…</div>
+        <div className="text-center" style={{ fontSize: 12, marginTop: 10, maxWidth: 300, lineHeight: 1.6, opacity: 0.7 }}>
+          Se demorar mais que alguns segundos, sua conexão pode estar instável.
+        </div>
+        <div className="flex gap-2 mt-4">
+          <button onClick={() => window.location.reload()} className="rounded-lg px-4 py-2"
+            style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.cream, fontSize: 12.5, fontWeight: 700 }}>
+            ↻ Recarregar
+          </button>
+          <button onClick={() => setTrackLoaded(true)} className="rounded-lg px-4 py-2"
+            style={{ background: "transparent", border: `1px solid ${C.line}`, color: C.mut, fontSize: 12.5 }}>
+            Continuar assim mesmo
+          </button>
+        </div>
       </div>
     );
   }
@@ -1810,6 +2001,92 @@ export default function App() {
   // ---------- Conquistas (administração) ----------
   if (showWins && admin) {
     const PATL = { horiz: "Linha Horizontal", vert: "Linha Vertical", diag: "Diagonal", corners: "4 Cantos", conv: "4 Conversões", full: "Cartela Cheia", bpm: "Giro de 175 BPM" };
+    const hoje = dayIndex(todayStr());
+
+    // ---- Monta uma ficha por aluno, com tudo que os filtros precisam ----
+    const fichas = [];
+    const prevM = MISSIONS;
+    TRACKS.forEach((t) => {
+      const d = allData[t.id]; if (!d) return;
+      MISSIONS = TRACK_MISSIONS[t.id];
+      d.students.forEach((s) => {
+        if (s.approved === false) return;
+        const r = computeProgress(s);
+        const recs = (s.records || []).filter((x) => x.status === "ok");
+        const dias = [...new Set(recs.map((x) => x.date))].sort();
+        const ultima = dias.length ? dias[dias.length - 1] : null;
+        const semPedalar = ultima ? hoje - dayIndex(ultima) : null;
+        const guestsOk = (s.guests || []).filter((g) => g.status === "ok");
+        const faltando = [];
+        MISSIONS.forEach((m) => {
+          const rem = m.target - Math.min(r.p[m.id], m.target);
+          if (rem === 1) faltando.push(m.name);
+        });
+        fichas.push({
+          id: s.id, nome: s.name, phone: s.phone, grupo: t.short, trackId: t.id,
+          aulas: recs.length, dias: dias.length, ultima, semPedalar,
+          feitas: r.doneCount, faltando,
+          quaseCartela: r.doneCount === 8,
+          amigos: guestsOk.length,
+          megafone: guestsOk.some((g) => g.kind === "novo"),
+          semIncentivo: !!s.semIncentivo,
+        });
+      });
+    });
+    MISSIONS = prevM;
+
+    // ---- Filtros disponíveis ----
+    const FILTROS = [
+      { id: "quase",   rot: "🔥 Falta 1",        desc: "A uma aula de completar uma missão",
+        fn: (f) => f.faltando.length > 0 || f.quaseCartela },
+      { id: "zero",    rot: "😴 Nunca pedalou",  desc: "Entrou no desafio mas não registrou nenhuma aula",
+        fn: (f) => f.aulas === 0 },
+      { id: "sumidos", rot: "👀 Sumidos 5d+",    desc: "Sem pedalar há 5 dias ou mais",
+        fn: (f) => f.semPedalar !== null && f.semPedalar >= 5 },
+      { id: "parados", rot: "⏳ Parados 3d+",    desc: "Sem pedalar há 3 dias ou mais",
+        fn: (f) => f.semPedalar !== null && f.semPedalar >= 3 },
+      { id: "megafone",rot: "📣 Trouxe amigo",   desc: "Já trouxe pelo menos um convidado novo",
+        fn: (f) => f.megafone },
+      { id: "semamigo",rot: "🤝 Sem convidado",  desc: "Ainda não trouxe ninguém",
+        fn: (f) => f.amigos === 0 },
+      { id: "fortes",  rot: "💪 Em alta",        desc: "Pedalou nos últimos 2 dias",
+        fn: (f) => f.semPedalar !== null && f.semPedalar <= 1 },
+      { id: "semtel",  rot: "📵 Sem telefone",   desc: "Cadastro sem WhatsApp — não dá para chamar por mensagem. Complete pelo menu Cadastros.",
+        fn: (f) => !f.phone || !String(f.phone).trim() },
+      { id: "todos",   rot: "👥 Todos",          desc: "Todos os participantes",
+        fn: () => true },
+    ];
+    const filtroAtivo = FILTROS.find((x) => x.id === filtroDesemp) || FILTROS[0];
+    const termo = buscaDesemp.trim().toLowerCase();
+    const lista = fichas
+      .filter(filtroAtivo.fn)
+      .filter((f) => !termo || f.nome.toLowerCase().includes(termo))
+      .sort((a, b) => {
+        if (filtroDesemp === "sumidos" || filtroDesemp === "parados") return (b.semPedalar || 0) - (a.semPedalar || 0);
+        if (filtroDesemp === "quase") return (b.quaseCartela ? 1 : 0) - (a.quaseCartela ? 1 : 0) || b.faltando.length - a.faltando.length;
+        return a.nome.localeCompare(b.nome);
+      });
+
+    // ---- Mensagem sob medida para cada situação ----
+    const msgPara = (f) => {
+      const p1 = f.nome.split(" ")[0];
+      if (f.aulas === 0)
+        return `Oi ${p1}! 💙 Vi que você entrou no Desafio das Missões mas ainda não registrou nenhuma aula. Tá com alguma dificuldade pra usar o app, ou pra encaixar o horário? Me fala que a gente dá um jeito juntas — quero muito te ver na bike! 🚴‍♀️`;
+      if (f.quaseCartela)
+        return `${p1}!! 🤯 Você está com 8 de 9 missões concluídas. FALTA UMA pra cartela cheia! Bora fechar essa semana? Me diz qual dia você consegue vir que eu te ajudo a montar a estratégia. 🏆`;
+      if (f.faltando.length > 0)
+        return `Oi ${p1}! 🔥 Você está a UMA aula de completar ${f.faltando.length > 1 ? "as missões " + f.faltando.join(" e ") : "a missão " + f.faltando[0]}. Vamos marcar essa aula? Me fala o melhor dia que eu te encaixo! 🚴‍♀️`;
+      if (f.semPedalar !== null && f.semPedalar >= 5)
+        return `Oi ${p1}! 💙 Faz ${f.semPedalar} dias que a gente não te vê por aqui e estamos com saudade. Tá tudo bem? Se precisar de ajuda pra retomar o ritmo, me chama — a bike tá te esperando! 🚴‍♀️`;
+      if (f.semPedalar !== null && f.semPedalar >= 3)
+        return `Oi ${p1}! 👀 Faz ${f.semPedalar} dias desde a sua última pedalada. Bora não perder o embalo do desafio? Qual dia dessa semana você consegue vir? 💪`;
+      if (f.amigos === 0)
+        return `Oi ${p1}! 📣 Sabia que trazer uma amiga pra experimentar vale missão no desafio? Ela ganha uma aula experimental e você avança na cartela. Tem alguém em mente? 💙`;
+      return `Oi ${p1}! 🚴‍♀️ Passando pra dizer que você está mandando muito bem no Desafio das Missões. Continua assim! 💪`;
+    };
+    const waLink = (f) => `https://wa.me/55${normPhone(f.phone || "")}?text=${encodeURIComponent(msgPara(f))}`;
+
+    // ---- Últimas conquistas (mantido) ----
     const feed = [];
     TRACKS.forEach((t) => {
       const d = allData[t.id]; if (!d) return;
@@ -1833,22 +2110,12 @@ export default function App() {
     }));
     feed.sort((a, b) => b.ts - a.ts);
 
-    const quase = [];
-    const prevM = MISSIONS;
-    TRACKS.forEach((t) => {
-      const d = allData[t.id]; if (!d) return;
-      MISSIONS = TRACK_MISSIONS[t.id];
-      d.students.forEach((s) => {
-        if (s.approved === false) return;
-        const r = computeProgress(s);
-        MISSIONS.forEach((m) => {
-          const rem = m.target - Math.min(r.p[m.id], m.target);
-          if (rem === 1) quase.push({ nome: s.name, oq: m.name, gr: t.short });
-        });
-        if (r.doneCount === 8) quase.push({ nome: s.name, oq: "CARTELA CHEIA (8/9!)", gr: t.short, destaque: true });
+    const alternarIncentivo = (f) => {
+      mutateTrack(f.trackId, (d) => {
+        const s = d.students.find((x) => x.id === f.id);
+        if (s) s.semIncentivo = !s.semIncentivo;
       });
-    });
-    MISSIONS = prevM;
+    };
 
     return (
       <div className="min-h-screen" style={{ ...pageVars, background: pageBg, fontFamily: "'Montserrat', sans-serif", transition: "background .4s" }}>
@@ -1858,28 +2125,105 @@ export default function App() {
             <button onClick={() => setShowWins(false)} style={{ color: C.oak, fontSize: 13 }}>← Voltar</button>
             {lockBtn}
           </div>
-          <h2 className="mt-4 mb-3" style={{ fontWeight: 800, fontSize: 22, color: C.amber, textTransform: "uppercase", letterSpacing: "0.03em" }}>
-            🏅 Últimas e Próximas Conquistas
+          <h2 className="mt-4 mb-1" style={{ fontWeight: 800, fontSize: 22, color: C.amber, textTransform: "uppercase", letterSpacing: "0.03em" }}>
+            🏅 Desempenho Geral
           </h2>
-
-          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, letterSpacing: "0.25em", color: C.oak, textTransform: "uppercase", margin: "6px 0" }}>
-            🔥 Próximas conquistas · {quase.length}
+          <div style={{ color: C.mut, fontSize: 11.5, marginBottom: 12, lineHeight: 1.5 }}>
+            Filtre a turma e toque em 📲 para chamar cada aluna com a mensagem certa pra situação dela.
           </div>
-          {quase.length === 0 && <div style={{ color: C.mut, fontSize: 12.5, marginBottom: 10 }}>Ninguém a 1 passo de completar algo — ainda.</div>}
-          <div className="flex flex-col gap-1 mb-4">
-            {quase.slice(0, 40).map((q, i) => (
-              <div key={i} className="rounded-lg px-3 py-1.5 flex items-center gap-2" style={{ background: C.panel, border: `1px solid ${q.destaque ? C.amber : C.line}` }}>
-                <span className="flex-1 min-w-0 truncate" style={{ color: C.cream, fontWeight: 700, fontSize: 12.5 }}>{q.nome}</span>
-                <span className="shrink-0" style={{ color: q.destaque ? C.amber : C.amberSoft, fontSize: 11.5, fontWeight: 700 }}>falta 1 · {q.oq}</span>
-                <span className="shrink-0" style={{ color: C.mut, fontSize: 10, fontFamily: "'DM Mono', monospace" }}>{q.gr}</span>
+
+          {/* Filtros */}
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            {FILTROS.map((f) => {
+              const n = fichas.filter(f.fn).length;
+              const on = filtroDesemp === f.id;
+              return (
+                <button key={f.id} onClick={() => setFiltroDesemp(f.id)}
+                  className="rounded-lg px-2.5 py-1.5"
+                  style={{ background: on ? C.amber : C.panel, color: on ? C.bg : C.cream, border: `1px solid ${on ? C.amber : C.line}`, fontSize: 11.5, fontWeight: on ? 800 : 600 }}>
+                  {f.rot} <span style={{ opacity: 0.75 }}>{n}</span>
+                </button>
+              );
+            })}
+          </div>
+          <div style={{ color: C.mut, fontSize: 11, marginBottom: 8 }}>{filtroAtivo.desc}</div>
+          {(() => {
+            const semTel = fichas.filter((f) => !f.phone || !String(f.phone).trim());
+            if (semTel.length === 0 || filtroDesemp === "semtel") return null;
+            return (
+              <button onClick={() => setFiltroDesemp("semtel")}
+                className="w-full rounded-lg px-3 py-2 mb-3 text-left"
+                style={{ background: C.wineDeep, border: `1px solid ${C.oak}66`, color: C.oak, fontSize: 11.5 }}>
+                📵 <b>{semTel.length} aluno{semTel.length === 1 ? "" : "s"} sem WhatsApp cadastrado</b> — não dá pra chamar por mensagem. Toque para ver quem é.
+              </button>
+            );
+          })()}
+
+          <input value={buscaDesemp} onChange={(e) => setBuscaDesemp(e.target.value)} placeholder="🔍 buscar por nome…"
+            className="w-full rounded-lg px-3 py-2 mb-3 outline-none"
+            style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.cream, fontSize: 13 }} />
+
+          {/* Lista */}
+          {lista.length === 0 && (
+            <div className="rounded-xl p-5 text-center" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.mut, fontSize: 12.5 }}>
+              Ninguém nesse filtro agora. 🎉
+            </div>
+          )}
+          <div className="flex flex-col gap-1.5">
+            {lista.map((f) => (
+              <div key={f.id + f.trackId} className="rounded-lg px-3 py-2.5" style={{ background: C.panel, border: `1px solid ${f.quaseCartela ? C.amber : C.line}` }}>
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="truncate" style={{ color: C.cream, fontWeight: 700, fontSize: 13 }}>{f.nome}</span>
+                      {f.megafone && <span title="Trouxe convidado novo" style={{ fontSize: 12 }}>📣</span>}
+                      {f.semIncentivo && <span title="Não quer receber mensagens de incentivo" style={{ fontSize: 12 }}>🔕</span>}
+                    </div>
+                    <div style={{ color: C.mut, fontSize: 10.5, fontFamily: "'DM Mono', monospace", marginTop: 2 }}>
+                      {f.grupo} · {f.aulas} aula{f.aulas === 1 ? "" : "s"} · {f.feitas}/9 missões
+                      {f.ultima ? ` · última ${fmtBR(f.ultima)}` : " · nunca pedalou"}
+                    </div>
+                    {f.quaseCartela && <div style={{ color: C.amber, fontSize: 11.5, fontWeight: 800, marginTop: 3 }}>🤯 8/9 — falta 1 pra CARTELA CHEIA!</div>}
+                    {!f.quaseCartela && f.faltando.length > 0 && (
+                      <div style={{ color: C.amberSoft, fontSize: 11.5, fontWeight: 700, marginTop: 3 }}>🔥 falta 1 · {f.faltando.join(", ")}</div>
+                    )}
+                    {f.semPedalar !== null && f.semPedalar >= 3 && (
+                      <div style={{ color: "#E8A0A8", fontSize: 11.5, fontWeight: 600, marginTop: 3 }}>👀 {f.semPedalar} dias sem pedalar</div>
+                    )}
+                    {!f.phone && (
+                      <div style={{ color: C.oak, fontSize: 11, fontWeight: 600, marginTop: 3 }}>📵 sem WhatsApp cadastrado</div>
+                    )}
+                  </div>
+                  <div className="flex flex-col gap-1 shrink-0">
+                    {f.phone && !f.semIncentivo && (
+                      <a href={waLink(f)} target="_blank" rel="noreferrer" title="Chamar no WhatsApp"
+                        className="rounded-lg px-2.5 py-1.5" style={{ background: "#25D366", textDecoration: "none", fontSize: 14, lineHeight: 1 }}>📲</a>
+                    )}
+                    {!f.phone && (
+                      <button
+                        onClick={() => {
+                          const txt = msgPara(f);
+                          try {
+                            navigator.clipboard.writeText(txt);
+                            avisar("📋 Mensagem copiada! Cole no WhatsApp da aluna.");
+                          } catch { avisar("Não consegui copiar. Toque e segure para selecionar o texto."); }
+                        }}
+                        title="Sem WhatsApp cadastrado — copiar a mensagem"
+                        className="rounded-lg px-2.5 py-1.5"
+                        style={{ background: C.wineDeep, border: `1px solid ${C.oak}`, color: C.oak, fontSize: 13, lineHeight: 1 }}>📋</button>
+                    )}
+                    <button onClick={() => alternarIncentivo(f)} title={f.semIncentivo ? "Voltar a enviar incentivos" : "Não enviar mensagens de incentivo"}
+                      className="rounded-lg px-2.5 py-1" style={{ background: "transparent", border: `1px solid ${C.line}`, color: C.mut, fontSize: 12 }}>
+                      {f.semIncentivo ? "🔔" : "🔕"}
+                    </button>
+                  </div>
+                </div>
               </div>
             ))}
           </div>
-          <div style={{ color: C.mut, fontSize: 11, marginBottom: 14, lineHeight: 1.5 }}>
-            💡 Use essa lista pro empurrãozinho no WhatsApp: "você está a UMA aula do shake!"
-          </div>
 
-          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, letterSpacing: "0.25em", color: C.oak, textTransform: "uppercase", margin: "6px 0" }}>
+          {/* Últimas conquistas */}
+          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, letterSpacing: "0.25em", color: C.oak, textTransform: "uppercase", margin: "20px 0 6px" }}>
             🏅 Últimas conquistas · {feed.length}
           </div>
           {feed.length === 0 && <div style={{ color: C.mut, fontSize: 12.5 }}>Nenhuma conquista registrada ainda.</div>}
@@ -1893,6 +2237,162 @@ export default function App() {
               </div>
             ))}
           </div>
+          {footerNote}
+          <div className="flex justify-center pb-8">{helpBtn}</div>
+        </main>
+      </div>
+    );
+  }
+
+  // ---------- Comportamento dos Usuários ----------
+  if (showUso && admin) {
+    if (!usoData && !usoLoading) {
+      setUsoLoading(true);
+      loadUso().then((u) => { setUsoData(u); setUsoLoading(false); }).catch(() => { setUsoData({}); setUsoLoading(false); });
+    }
+    const agora = Date.now();
+    const TELA_NOME = {
+      inicio: "Início", cartela: "Cartela", pendencias: "Pendências", cadastros: "Cadastros",
+      relampago: "Relâmpago", relatorio: "Relatório", desempenho: "Desempenho", premios: "Prêmios",
+      manual: "Manual", uso: "Comportamento",
+    };
+    const linhas = Object.entries(usoData || {}).map(([sid, e]) => {
+      const min = Math.round(e.minutos || 0);
+      const top = Object.entries(e.telas || {}).sort((a, b) => b[1] - a[1]).slice(0, 3);
+      return {
+        sid, nome: e.nome || "—", track: e.track,
+        grupo: (TRACKS.find((t) => t.id === e.track) || {}).short || "—",
+        sessoes: e.sessoes || 0, minutos: min, ultimo: e.ultimo || 0,
+        online: agora - (e.ultimo || 0) < 5 * 60000,
+        telas: top,
+      };
+    });
+    const online = linhas.filter((l) => l.online);
+    const ordenadas = [...linhas].sort((a, b) => {
+      if (usoOrdem === "alfabetica") return a.nome.localeCompare(b.nome);
+      if (usoOrdem === "tempo") return b.minutos - a.minutos;
+      if (usoOrdem === "sessoes") return b.sessoes - a.sessoes;
+      return b.ultimo - a.ultimo;
+    });
+    const totalMin = linhas.reduce((n, l) => n + l.minutos, 0);
+    const totalSes = linhas.reduce((n, l) => n + l.sessoes, 0);
+    const telasGerais = {};
+    linhas.forEach((l) => l.telas.forEach(([t, n]) => { telasGerais[t] = (telasGerais[t] || 0) + n; }));
+    const topTelas = Object.entries(telasGerais).sort((a, b) => b[1] - a[1]).slice(0, 6);
+    const quando = (ts) => {
+      if (!ts) return "nunca";
+      const d = agora - ts;
+      if (d < 60000) return "agora";
+      if (d < 3600000) return `há ${Math.floor(d / 60000)} min`;
+      if (d < 86400000) return `há ${Math.floor(d / 3600000)}h`;
+      return fmtTs(ts);
+    };
+    const Ordem = ({ id, rot }) => (
+      <button onClick={() => setUsoOrdem(id)} className="rounded-lg px-2.5 py-1.5"
+        style={{ background: usoOrdem === id ? C.amber : C.panel, color: usoOrdem === id ? C.bg : C.cream,
+                 border: `1px solid ${usoOrdem === id ? C.amber : C.line}`, fontSize: 11.5, fontWeight: usoOrdem === id ? 800 : 600 }}>
+        {rot}
+      </button>
+    );
+
+    return (
+      <div className="min-h-screen" style={{ ...pageVars, background: pageBg, fontFamily: "'Montserrat', sans-serif", transition: "background .4s" }}>
+        {fonts}{modal}
+        <main className="max-w-md mx-auto px-5 pb-16 pt-6">
+          <div className="flex items-center justify-between">
+            <button onClick={() => setShowUso(false)} style={{ color: C.oak, fontSize: 13 }}>← Voltar</button>
+            {lockBtn}
+          </div>
+          <h2 className="mt-4 mb-1" style={{ fontWeight: 800, fontSize: 22, color: C.amber, textTransform: "uppercase", letterSpacing: "0.03em" }}>
+            📈 Comportamento dos Usuários
+          </h2>
+          <div style={{ color: C.mut, fontSize: 11.5, marginBottom: 12, lineHeight: 1.5 }}>
+            Registro de quem abre a cartela, quanto tempo fica e onde navega. Só conta alunas — o acesso da administração não entra.
+          </div>
+
+          {usoLoading && <div className="text-center py-10" style={{ color: C.mut, fontSize: 13 }}>carregando…</div>}
+
+          {!usoLoading && linhas.length === 0 && (
+            <div className="rounded-xl p-5 text-center" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.mut, fontSize: 12.5, lineHeight: 1.6 }}>
+              Ainda não há registros. Os dados começam a aparecer conforme as alunas abrirem a cartela delas a partir de agora.
+            </div>
+          )}
+
+          {!usoLoading && linhas.length > 0 && (
+            <>
+              {/* Resumo */}
+              <div className="grid grid-cols-2 gap-2 mb-3">
+                <div className="rounded-xl p-3" style={{ background: online.length ? C.wineDeep : C.panel, border: `1px solid ${online.length ? C.ok : C.line}` }}>
+                  <div style={{ color: online.length ? C.ok : C.mut, fontSize: 22, fontWeight: 800 }}>
+                    {online.length ? "🟢" : "⚪"} {online.length}
+                  </div>
+                  <div style={{ color: C.mut, fontSize: 10.5, marginTop: 2 }}>online agora (5 min)</div>
+                </div>
+                <div className="rounded-xl p-3" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+                  <div style={{ color: C.amberSoft, fontSize: 22, fontWeight: 800 }}>{linhas.length}</div>
+                  <div style={{ color: C.mut, fontSize: 10.5, marginTop: 2 }}>alunas já usaram</div>
+                </div>
+                <div className="rounded-xl p-3" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+                  <div style={{ color: C.amberSoft, fontSize: 22, fontWeight: 800 }}>{totalSes}</div>
+                  <div style={{ color: C.mut, fontSize: 10.5, marginTop: 2 }}>acessos no total</div>
+                </div>
+                <div className="rounded-xl p-3" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+                  <div style={{ color: C.amberSoft, fontSize: 22, fontWeight: 800 }}>{totalMin}</div>
+                  <div style={{ color: C.mut, fontSize: 10.5, marginTop: 2 }}>minutos somados</div>
+                </div>
+              </div>
+
+              {/* Telas mais visitadas */}
+              {topTelas.length > 0 && (
+                <div className="rounded-xl p-3 mb-3" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+                  <div style={{ color: C.oak, fontSize: 10.5, letterSpacing: "0.16em", textTransform: "uppercase", fontFamily: "'DM Mono', monospace", marginBottom: 6 }}>
+                    Telas mais visitadas
+                  </div>
+                  {topTelas.map(([t, n]) => {
+                    const maior = topTelas[0][1] || 1;
+                    return (
+                      <div key={t} className="flex items-center gap-2 mb-1">
+                        <span style={{ color: C.cream, fontSize: 11.5, width: 92 }}>{TELA_NOME[t] || t}</span>
+                        <span style={{ flex: 1, height: 6, background: C.line, borderRadius: 3, overflow: "hidden" }}>
+                          <span style={{ display: "block", height: "100%", width: `${(n / maior) * 100}%`, background: C.amber }} />
+                        </span>
+                        <span style={{ color: C.mut, fontSize: 10.5, fontFamily: "'DM Mono', monospace", width: 30, textAlign: "right" }}>{n}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Ordenação */}
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                <Ordem id="recente" rot="🕐 Mais recentes" />
+                <Ordem id="tempo" rot="⏱️ Mais tempo" />
+                <Ordem id="sessoes" rot="🔁 Mais acessos" />
+                <Ordem id="alfabetica" rot="🔤 A–Z" />
+              </div>
+
+              {/* Lista */}
+              <div className="flex flex-col gap-1.5">
+                {ordenadas.map((l) => (
+                  <div key={l.sid} className="rounded-lg px-3 py-2.5" style={{ background: C.panel, border: `1px solid ${l.online ? C.ok + "88" : C.line}` }}>
+                    <div className="flex items-center gap-2">
+                      <span style={{ fontSize: 9, color: l.online ? C.ok : C.line }}>●</span>
+                      <span className="flex-1 min-w-0 truncate" style={{ color: C.cream, fontWeight: 700, fontSize: 13 }}>{l.nome}</span>
+                      <span style={{ color: C.mut, fontSize: 10, fontFamily: "'DM Mono', monospace" }}>{l.grupo}</span>
+                    </div>
+                    <div style={{ color: C.mut, fontSize: 10.5, fontFamily: "'DM Mono', monospace", marginTop: 3 }}>
+                      {l.sessoes} acesso{l.sessoes === 1 ? "" : "s"} · {l.minutos} min · {quando(l.ultimo)}
+                    </div>
+                    {l.telas.length > 0 && (
+                      <div style={{ color: C.oak, fontSize: 10.5, marginTop: 3 }}>
+                        {l.telas.map(([t, n]) => `${TELA_NOME[t] || t} (${n})`).join(" · ")}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
           {footerNote}
           <div className="flex justify-center pb-8">{helpBtn}</div>
         </main>
@@ -2373,7 +2873,7 @@ export default function App() {
                     if (mm.mode === "quizText" && !answers.length) { setMmMsg("Informe ao menos 1 resposta aceita."); return; }
                     if (mm.mode === "quizChoice" && (options.length < 2 || !mm.correct)) { setMmMsg("Informe 2+ opções e marque a correta."); return; }
                     const nova = {
-                      id: Date.now().toString(36),
+                      id: novoId(),
                       name: mm.name.trim(), desc: mm.desc.trim(), prize: mm.prize.trim(),
                       qty: mm.qty, startTs, endTs, start: isoDateOf(startTs), end: isoDateOf(endTs),
                       mode: mm.mode, slots: mm.slots, winners: [], log: [],
@@ -2592,6 +3092,84 @@ export default function App() {
             {rows.length} aluno{rows.length === 1 ? "" : "s"} nos 3 desafios, em ordem alfabética
             {semZap > 0 && <span style={{ color: C.oak }}> · {semZap} sem WhatsApp</span>}
           </div>
+          {/* Cadastrar aluno direto por aqui */}
+          {!novoCad ? (
+            <button
+              onClick={() => setNovoCad({ nome: "", fone: "", senha: "", track: TRACKS[0].id, erro: "" })}
+              className="w-full rounded-lg px-4 py-2.5 mb-3 font-bold"
+              style={{ background: C.amber, color: C.bg, fontSize: 13 }}
+            >
+              ➕ Cadastrar aluno
+            </button>
+          ) : (
+            <div className="rounded-xl p-3 mb-3 flex flex-col gap-2" style={{ background: C.panel, border: `1px solid ${C.amber}66` }}>
+              <div style={{ color: C.amberSoft, fontWeight: 800, fontSize: 12.5 }}>➕ Novo cadastro</div>
+              <input
+                value={novoCad.nome} autoFocus
+                onChange={(e) => setNovoCad({ ...novoCad, nome: e.target.value, erro: "" })}
+                placeholder="Nome e sobrenome"
+                className="rounded-lg px-3 py-2 outline-none"
+                style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream, fontSize: 13 }}
+              />
+              <div className="flex gap-2">
+                <input
+                  value={novoCad.fone} inputMode="numeric"
+                  onChange={(e) => setNovoCad({ ...novoCad, fone: e.target.value, erro: "" })}
+                  placeholder="WhatsApp com DDD"
+                  className="flex-1 rounded-lg px-3 py-2 outline-none"
+                  style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream, fontSize: 13 }}
+                />
+                <input
+                  value={novoCad.senha}
+                  onChange={(e) => setNovoCad({ ...novoCad, senha: e.target.value, erro: "" })}
+                  placeholder="Senha (mín. 4)"
+                  className="rounded-lg px-3 py-2 outline-none"
+                  style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream, fontSize: 13, width: 120 }}
+                />
+              </div>
+              <select
+                value={novoCad.track}
+                onChange={(e) => setNovoCad({ ...novoCad, track: e.target.value })}
+                className="rounded-lg px-3 py-2 outline-none"
+                style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream, fontSize: 13 }}
+              >
+                {TRACKS.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+              </select>
+              {novoCad.erro && <div style={{ color: "#C96A76", fontSize: 11.5 }}>{novoCad.erro}</div>}
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    const nome = novoCad.nome.trim().replace(/\s+/g, " ");
+                    if (nome.split(" ").filter((w) => w.length >= 2).length < 2) {
+                      setNovoCad({ ...novoCad, erro: "Digite nome e sobrenome." }); return;
+                    }
+                    const fone = normPhone(novoCad.fone);
+                    if (fone.length < 10 || fone.length > 11) {
+                      setNovoCad({ ...novoCad, erro: "WhatsApp com DDD, só números (ex.: 18999342345)." }); return;
+                    }
+                    const senha = novoCad.senha.trim();
+                    if (senha.length < 4) {
+                      setNovoCad({ ...novoCad, erro: "A senha precisa ter ao menos 4 caracteres." }); return;
+                    }
+                    const jaTem = TRACKS.some((t) => ((allData[t.id] || {}).students || [])
+                      .some((s) => s.name.toLowerCase() === nome.toLowerCase() || (s.phone && normPhone(s.phone) === fone)));
+                    if (jaTem) {
+                      setNovoCad({ ...novoCad, erro: "Já existe um cadastro com esse nome ou telefone." }); return;
+                    }
+                    mutateTrack(novoCad.track, (d) => {
+                      d.students.push({ id: novoId(), name: nome, pass: senha, phone: fone, friends: 0, guests: [], records: [], approved: true });
+                    });
+                    setNovoCad(null);
+                    avisar(`✓ ${nome.split(" ")[0]} cadastrada e já liberada!`);
+                  }}
+                  className="flex-1 rounded-lg py-2 font-bold"
+                  style={{ background: C.ok, color: C.bg, fontSize: 13 }}
+                >✓ Cadastrar</button>
+                <button onClick={() => setNovoCad(null)} className="rounded-lg px-4 py-2"
+                  style={{ border: `1px solid ${C.line}`, color: C.mut, fontSize: 13 }}>Cancelar</button>
+              </div>
+            </div>
+          )}
           <input
             value={cadQ}
             onChange={(e) => setCadQ(e.target.value)}
@@ -2801,140 +3379,6 @@ export default function App() {
   }
 
   // ---------- Escolha do desafio ----------
-  if (!track) {
-    return (
-      <div className="min-h-screen" style={{ ...pageVars, background: pageBg, fontFamily: "'Montserrat', sans-serif", transition: "background .4s" }}>
-        {fonts}{modal}
-        <header className="pt-6 pb-2 px-5">
-          <div className="flex items-center justify-between">{helpBtn}{lockBtn}</div>
-          <div className="text-center">
-            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, letterSpacing: "0.35em", color: C.oak, textTransform: "uppercase" }}>
-              Spincycle Prudente
-            </div>
-            <h1
-              onClick={() => { setView(null); setSpy(false); setShowManual(false); setShowPend(false); setShowCad(false); setShowEntry(false); setLoginMode(false); setShowSignup(false); setRecMode(false); setData(null); setTrack(null); }}
-              title="Voltar ao início"
-              style={{ fontFamily: "'Montserrat', sans-serif", fontWeight: 800, fontSize: 34, letterSpacing: "0.04em", color: C.cream, textTransform: "uppercase", lineHeight: 1.05, marginTop: 6, cursor: "pointer" }}
-            >
-              Desafio das <span style={{ color: C.amber, textShadow: `0 0 24px ${C.amber}66` }}>Missões</span>
-            </h1>
-            <div className="mx-auto mt-4" style={{ width: 56, height: 3, background: `linear-gradient(90deg, ${C.amber}, ${C.amberSoft})`, borderRadius: 2 }} />
-          </div>
-        </header>
-        <main className="max-w-md mx-auto px-5 pb-16">
-          <p className="text-center mt-4 mb-4" style={{ color: C.mut, fontSize: 14 }}>
-            Escolha o desafio do seu plano:
-          </p>
-          <div className="flex flex-col gap-3">
-            {TRACKS.map((t) => (
-              <button
-                key={t.id}
-                onClick={() => { setData(null); setView(null); setShowSignup(false); setTrack(t.id); saveTrackPref(t.id); }}
-                className="rounded-xl px-5 py-4 text-left"
-                style={{ background: C.panel, border: `1px solid ${C.line}` }}
-              >
-                <div style={{ color: C.amberSoft, fontWeight: 800, fontSize: 17, textTransform: "uppercase", letterSpacing: "0.03em" }}>
-                  {t.label}
-                </div>
-                <div style={{ color: C.mut, fontSize: 12, marginTop: 2 }}>{t.sub}</div>
-                {trackCounts[t.id] != null && (
-                  <div style={{ color: C.amberSoft, fontSize: 11.5, marginTop: 5, fontWeight: 700 }}>
-                    👥 {trackCounts[t.id]} participante{trackCounts[t.id] === 1 ? "" : "s"}
-                  </div>
-                )}
-                {t.note && (
-                  <div style={{ color: C.oak, fontSize: 10.5, marginTop: 6, fontStyle: "italic" }}>{t.note}</div>
-                )}
-              </button>
-            ))}
-          </div>
-          {admin && (
-            <button
-              onClick={() => { setShowPend(true); window.scrollTo({ top: 0 }); }}
-              className="w-full rounded-lg px-3 py-2.5 mt-4 text-center font-bold"
-              style={{ background: C.wineDeep, color: C.amberSoft, fontSize: 13, border: `1px solid ${C.amber}66` }}
-            >
-              📋 PENDÊNCIAS · {(() => {
-                let n = 0;
-                TRACKS.forEach((t) => {
-                  const d = allData[t.id];
-                  if (!d) return;
-                  d.students.forEach((s) => {
-                    n += (s.records || []).filter((r) => r.status === "pending").length;
-                    n += (s.guests || []).filter((g) => g.status === "pending").length;
-                    if (s.approved === false) n += 1;
-                  });
-                });
-                return n;
-              })()} → abrir central de validação
-            </button>
-          )}
-          {admin && (
-            <button
-              onClick={() => { setShowCad(true); setCadQ(""); setEditC(null); window.scrollTo({ top: 0 }); }}
-              className="w-full rounded-lg px-3 py-2.5 mt-2 text-center font-bold"
-              style={{ background: C.panel, color: C.amberSoft, fontSize: 13, border: `1px solid ${C.line}` }}
-            >
-              👥 CADASTROS · {TRACKS.reduce((n, t) => n + ((allData[t.id] || {}).students || []).length, 0)} → ver e editar todos
-            </button>
-          )}
-          {admin && (
-            <button
-              onClick={() => { setShowMM(true); window.scrollTo({ top: 0 }); }}
-              className="w-full rounded-lg px-3 py-2.5 mt-2 text-center font-bold"
-              style={{ background: C.panel, color: C.amberSoft, fontSize: 13, border: `1px solid ${C.amber}66` }}
-            >
-              ⚡ MISSÕES RELÂMPAGO → criar e gerenciar
-            </button>
-          )}
-          {admin && (
-            <button
-              onClick={() => { setShowRel(true); window.scrollTo({ top: 0 }); }}
-              className="w-full rounded-lg px-3 py-2.5 mt-2 text-center font-bold"
-              style={{ background: C.panel, color: C.amberSoft, fontSize: 13, border: `1px solid ${C.line}` }}
-            >
-              📊 RELATÓRIO GERAL → alunos, aulas e crescimento semanal
-            </button>
-          )}
-          {admin && (
-            <button
-              onClick={() => { setShowWins(true); window.scrollTo({ top: 0 }); }}
-              className="w-full rounded-lg px-3 py-2.5 mt-2 text-center font-bold"
-              style={{ background: C.panel, color: C.amberSoft, fontSize: 13, border: `1px solid ${C.line}` }}
-            >
-              🏅 ÚLTIMAS E PRÓXIMAS CONQUISTAS
-            </button>
-          )}
-          <button
-            onClick={() => {
-              setShowPremios(true);
-              if (!premiosData) {
-                setPremiosLoading(true);
-                (async () => {
-                  const out = {};
-                  for (const t of TRACKS) {
-                    try { out[t.id] = await loadData(t.id); } catch { out[t.id] = null; }
-                  }
-                  let gl = { miniMissions: [] };
-                  try { gl = await loadGlobal(); } catch { /* ok */ }
-                  out._global = gl;
-                  setPremiosData(out);
-                  setPremiosLoading(false);
-                })();
-              }
-              window.scrollTo({ top: 0 });
-            }}
-            className="w-full rounded-lg px-3 py-2.5 mt-3 text-center font-bold"
-            style={{ background: C.panel, color: C.ok, fontSize: 13, border: `1px solid ${C.ok}44` }}
-          >
-            🏆 MISSÕES CONCLUÍDAS → ver prêmios e colocações
-          </button>
-          {footerNote}
-        </main>
-      </div>
-    );
-  }
-
   // ---------- Página pública: Missões e Prêmios Concluídos ----------
   if (showPremios) {
     const PATL = {
@@ -2948,7 +3392,7 @@ export default function App() {
     };
     const grupos = [];
     if (!premiosLoading && premiosData) {
-      TRACKS.forEach((t) => {
+      TRACKS.filter((t) => !premiosTrack || t.id === premiosTrack).forEach((t) => {
         const d = premiosData[t.id]; if (!d) return;
         const M = TRACK_MISSIONS[t.id];
         const w = d.winners || {};
@@ -2974,8 +3418,9 @@ export default function App() {
       });
       // Relâmpagos globais e por grupo
       const minis = [
-        ...((premiosData._global || {}).miniMissions || []).map((x) => ({ x, gr: "🌍 Todos" })),
-        ...TRACKS.flatMap((t) => ((premiosData[t.id] || {}).miniMissions || []).map((x) => ({ x, gr: t.short }))),
+        ...(premiosTrack ? [] : ((premiosData._global || {}).miniMissions || []).map((x) => ({ x, gr: "🌍 Todos" }))),
+        ...TRACKS.filter((t) => !premiosTrack || t.id === premiosTrack)
+          .flatMap((t) => ((premiosData[t.id] || {}).miniMissions || []).map((x) => ({ x, gr: t.short }))),
       ];
       minis.forEach(({ x, gr }) => {
         const ws = (x.winners || []);
@@ -2991,15 +3436,23 @@ export default function App() {
         {fonts}{modal}
         <main className="max-w-md mx-auto px-5 pb-16 pt-6">
           <div className="flex items-center justify-between">
-            <button onClick={() => { setShowPremios(false); setPremiosExpanded(null); }} style={{ color: C.oak, fontSize: 13 }}>← Voltar</button>
+            <button onClick={() => { setShowPremios(false); setPremiosExpanded(null); setPremiosTrack(null); }} style={{ color: C.oak, fontSize: 13 }}>← Voltar</button>
             {lockBtn}
           </div>
           <h2 className="mt-4 mb-1" style={{ fontWeight: 800, fontSize: 22, color: C.amber, textTransform: "uppercase", letterSpacing: "0.03em" }}>
             🏆 Missões Concluídas
           </h2>
           <div style={{ color: C.mut, fontSize: 12, marginBottom: 12 }}>
-            Prêmios já conquistados — toque em qualquer um para ver a colocação completa.
+            {premiosTrack
+              ? <>Grupo <b style={{ color: C.amberSoft }}>{(TRACKS.find((t) => t.id === premiosTrack) || {}).label}</b> — toque em qualquer prêmio para ver a colocação completa.</>
+              : "Prêmios já conquistados — toque em qualquer um para ver a colocação completa."}
           </div>
+          {premiosTrack && (
+            <button onClick={() => setPremiosTrack(null)} className="rounded-lg px-3 py-1.5 mb-3"
+              style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.amberSoft, fontSize: 11.5 }}>
+              👥 Ver de todos os grupos
+            </button>
+          )}
 
           {premiosLoading && (
             <div className="text-center py-10" style={{ color: C.mut, fontSize: 13 }}>carregando prêmios…</div>
@@ -3079,6 +3532,175 @@ export default function App() {
     );
   }
 
+  if (!track) {
+    return (
+      <div className="min-h-screen" style={{ ...pageVars, background: pageBg, fontFamily: "'Montserrat', sans-serif", transition: "background .4s" }}>
+        {fonts}{modal}
+        <header className="pt-6 pb-2 px-5">
+          <div className="flex items-center justify-between">{helpBtn}{lockBtn}</div>
+          <div className="text-center">
+            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, letterSpacing: "0.35em", color: C.oak, textTransform: "uppercase" }}>
+              Spincycle Prudente
+            </div>
+            <h1
+              onClick={() => { setView(null); setSpy(false); setShowManual(false); setShowPend(false); setShowCad(false); setShowEntry(false); setLoginMode(false); setShowSignup(false); setRecMode(false); setData(null); setTrack(null); }}
+              title="Voltar ao início"
+              style={{ fontFamily: "'Montserrat', sans-serif", fontWeight: 800, fontSize: 34, letterSpacing: "0.04em", color: C.cream, textTransform: "uppercase", lineHeight: 1.05, marginTop: 6, cursor: "pointer" }}
+            >
+              Desafio das <span style={{ color: C.amber, textShadow: `0 0 24px ${C.amber}66` }}>Missões</span>
+            </h1>
+            <div className="mx-auto mt-4" style={{ width: 56, height: 3, background: `linear-gradient(90deg, ${C.amber}, ${C.amberSoft})`, borderRadius: 2 }} />
+          </div>
+        </header>
+        <main className="max-w-md mx-auto px-5 pb-16">
+          {/* ---- Grade de atalhos do admin (2 colunas) ---- */}
+          {admin && (() => {
+            const nPend = (() => {
+              let n = 0;
+              TRACKS.forEach((t) => {
+                const d = allData[t.id];
+                if (!d) return;
+                d.students.forEach((s) => {
+                  n += (s.records || []).filter((r) => r.status === "pending").length;
+                  n += (s.guests || []).filter((g) => g.status === "pending").length;
+                  if (s.approved === false) n += 1;
+                });
+              });
+              return n;
+            })();
+            const nCad = TRACKS.reduce((n, t) => n + ((allData[t.id] || {}).students || []).length, 0);
+            const Atalho = ({ icone, titulo, badge, destaque, onClick }) => (
+              <button onClick={() => { onClick(); window.scrollTo({ top: 0 }); }}
+                className="rounded-xl px-3 py-4 flex flex-col items-center justify-center gap-2"
+                style={{ background: C.panel, border: `1px solid ${destaque ? C.amber + "88" : C.line}`, minHeight: 92 }}>
+                <span style={{ fontSize: 22, lineHeight: 1 }}>{icone}</span>
+                <span style={{ color: C.amberSoft, fontWeight: 800, fontSize: 11.5, textTransform: "uppercase", letterSpacing: "0.04em", textAlign: "center", lineHeight: 1.25 }}>
+                  {titulo}
+                </span>
+                {badge != null && (
+                  <span className="rounded-full px-2" style={{ background: destaque ? C.amber : C.wineDeep, color: destaque ? C.bg : C.amberSoft, fontSize: 10.5, fontWeight: 800 }}>
+                    {badge}
+                  </span>
+                )}
+              </button>
+            );
+            return (
+              <div className="grid grid-cols-2 gap-2 mt-4 mb-5">
+                <Atalho icone="📋" titulo="Pendências" badge={nPend} destaque={nPend > 0} onClick={() => setShowPend(true)} />
+                <Atalho icone="👥" titulo="Cadastros" badge={nCad} onClick={() => { setShowCad(true); setCadQ(""); setEditC(null); }} />
+                <Atalho icone="🏅" titulo="Desempenho do desafio" onClick={() => setShowWins(true)} />
+                <Atalho icone="⚡" titulo="Missões relâmpago" onClick={() => setShowMM(true)} />
+                <Atalho icone="📊" titulo="Relatório geral" onClick={() => setShowRel(true)} />
+                <Atalho icone="📈" titulo="Comportamento dos usuários" onClick={() => setShowUso(true)} />
+              </div>
+            );
+          })()}
+
+          {/* ---- Grupos de alunos ---- */}
+          {admin && (
+            <div className="flex items-center gap-3 mb-2">
+              <span style={{ color: C.amberSoft, fontWeight: 800, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.12em" }}>
+                Grupos de alunos
+              </span>
+              <span style={{ flex: 1, height: 1, background: C.line }} />
+            </div>
+          )}
+          {!admin && (
+            <p className="text-center mt-4 mb-4" style={{ color: C.mut, fontSize: 14 }}>
+              Escolha o desafio do seu plano:
+            </p>
+          )}
+          <div className="flex flex-col gap-3">
+            {TRACKS.map((t) => {
+              const cartao = (
+                <button
+                  onClick={() => { setData(null); setView(null); setShowSignup(false); setTrack(t.id); saveTrackPref(t.id); }}
+                  className="rounded-xl px-5 py-4 text-left w-full h-full"
+                  style={{ background: C.panel, border: `1px solid ${C.line}` }}
+                >
+                  <div style={{ color: C.amberSoft, fontWeight: 800, fontSize: 17, textTransform: "uppercase", letterSpacing: "0.03em" }}>
+                    {t.label}
+                  </div>
+                  <div style={{ color: C.mut, fontSize: 12, marginTop: 2 }}>{t.sub}</div>
+                  {trackCounts[t.id] != null && (
+                    <div style={{ color: C.amberSoft, fontSize: 11.5, marginTop: 5, fontWeight: 700 }}>
+                      👥 {trackCounts[t.id]} participante{trackCounts[t.id] === 1 ? "" : "s"}
+                    </div>
+                  )}
+                  {t.note && (
+                    <div style={{ color: C.oak, fontSize: 10.5, marginTop: 6, fontStyle: "italic" }}>{t.note}</div>
+                  )}
+                </button>
+              );
+              if (!admin) return <div key={t.id}>{cartao}</div>;
+              return (
+                <div key={t.id} className="flex gap-2 items-stretch">
+                  <div className="flex-1 min-w-0">{cartao}</div>
+                  <button
+                    onClick={() => {
+                      setPremiosTrack(t.id);
+                      setShowPremios(true);
+                      if (!premiosData) {
+                        setPremiosLoading(true);
+                        (async () => {
+                          const out = {};
+                          for (const tt of TRACKS) {
+                            try { out[tt.id] = await loadData(tt.id); } catch { out[tt.id] = null; }
+                          }
+                          let gl = { miniMissions: [] };
+                          try { gl = await loadGlobal(); } catch { /* ok */ }
+                          out._global = gl;
+                          setPremiosData(out);
+                          setPremiosLoading(false);
+                        })();
+                      }
+                      window.scrollTo({ top: 0 });
+                    }}
+                    className="rounded-xl px-3 py-3 flex flex-col items-center justify-center gap-1.5 shrink-0"
+                    style={{ background: C.panel, border: `1px solid ${C.line}`, width: 104 }}
+                  >
+                    <span style={{ fontSize: 20, lineHeight: 1 }}>🏆</span>
+                    <span style={{ color: C.amberSoft, fontWeight: 800, fontSize: 9.5, textTransform: "uppercase", letterSpacing: "0.04em", textAlign: "center", lineHeight: 1.25 }}>
+                      Missões concluídas
+                    </span>
+                    <span style={{ width: 22, height: 2, background: C.amber }} />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+          {!admin && (
+            <button
+              onClick={() => {
+                setShowPremios(true);
+                if (!premiosData) {
+                  setPremiosLoading(true);
+                  (async () => {
+                    const out = {};
+                    for (const t of TRACKS) {
+                      try { out[t.id] = await loadData(t.id); } catch { out[t.id] = null; }
+                    }
+                    let gl = { miniMissions: [] };
+                    try { gl = await loadGlobal(); } catch { /* ok */ }
+                    out._global = gl;
+                    setPremiosData(out);
+                    setPremiosLoading(false);
+                  })();
+                }
+                window.scrollTo({ top: 0 });
+              }}
+              className="w-full rounded-lg px-3 py-2.5 mt-3 text-center font-bold"
+              style={{ background: C.panel, color: C.ok, fontSize: 13, border: `1px solid ${C.ok}44` }}
+            >
+              🏆 MISSÕES CONCLUÍDAS → ver prêmios e colocações
+            </button>
+          )}
+          {footerNote}
+        </main>
+      </div>
+    );
+  }
+
   // ---------- Manual Prático das Missões ----------
   if (showManual) {
     const M = TRACK_MISSIONS[track];
@@ -3088,19 +3710,19 @@ export default function App() {
       ilimitado: {
         dobraDica: "4 dobradinhas em 47 dias = menos de 1 por semana. Programe as suas!",
         maratonaEx: "Treinando 5x por semana desde o início, você fecha os 30 dias na 6ª semana.",
-        semanaEx: "Segunda a domingo da mesma semana, sem pular nenhum dia — os 4 horários do fim de semana ajudam a fechar.",
+        semanaEx: "7 dias seguidos, sem pular nenhum. Pode começar em qualquer dia — os horários do fim de semana ajudam a manter a sequência.",
         fogoEx: "De 10 a 21 de agosto sem falhar um dia = 12 dias de fogo.",
       },
       pacote: {
         dobraDica: "2 dobradinhas custam só 4 aulas do seu pacote — escolha os dias com carinho.",
         maratonaEx: "3 a 4 aulas por semana desde o início fecham os 16 dias com folga.",
-        semanaEx: "Seg, qua, sex + sáb e dom da mesma semana = 5 dias.",
+        semanaEx: "Ex.: quinta, sexta, sábado, domingo e segunda = 5 dias seguidos. ✅",
         fogoEx: "Quarta a domingo sem falhar = 5 dias seguidos (o fim de semana é seu aliado).",
       },
       passe: {
         dobraDica: "Os apps permitem 1 check-in por dia — a 2ª aula da dobradinha pode ser 1 aula avulsa. É só uma vez no desafio inteiro!",
         maratonaEx: "3 a 4 check-ins por semana desde o início fecham os 15 dias tranquilamente.",
-        semanaEx: "Seg, qua, sex + sábado da mesma semana = 4 dias.",
+        semanaEx: "Ex.: sexta, sábado, domingo e segunda = 4 dias seguidos. ✅",
         fogoEx: "Quinta a domingo sem falhar = 4 dias seguidos.",
       },
     }[track] || {};
@@ -3139,10 +3761,10 @@ export default function App() {
         dica: "É a missão da constância — o coração do desafio.",
       },
       semana: {
-        meta: TG.semana === 7 ? "7 dias (seg a dom)" : `${TG.semana} dias na mesma semana`,
+        meta: `${TG.semana} dias seguidos`,
         como: TG.semana === 7
-          ? "Treinar todos os dias de uma mesma semana, de segunda a domingo."
-          : `Treinar em ${TG.semana} dias diferentes dentro de uma mesma semana (segunda a domingo).`,
+          ? "Treinar 7 dias seguidos, sem falhar nenhum. A sequência pode começar em qualquer dia da semana."
+          : `Treinar ${TG.semana} dias seguidos, sem falhar nenhum. A sequência pode começar em qualquer dia da semana.`,
         ex: [`Exemplo: ${EX.semanaEx}`],
       },
       zona: {
@@ -3398,7 +4020,7 @@ export default function App() {
       s.records.push({
         ...form,
         instructor: form.instructor.trim(),
-        id: Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+        id: novoId(),
         reg: Date.now(),
         status: admin ? "ok" : "pending",
       });
@@ -3426,7 +4048,7 @@ export default function App() {
         date: qform.date,
         slot: qform.slot,
         instructor: qform.instructor,
-        id: Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+        id: novoId(),
         reg: Date.now(),
         status: admin ? "ok" : "pending",
       });
@@ -3442,7 +4064,8 @@ export default function App() {
       setGErr("Digite o nome completo do amigo (nome e sobrenome).");
       return;
     }
-    if (!gform.slot) { setGErr("Selecione o horário da aula experimental do seu convidado."); return; }
+    // Aluno já da casa convidado ao desafio (📣) não faz aula experimental → horário não se aplica
+    if (gform.kind !== "spin" && !gform.slot) { setGErr("Selecione o horário da aula experimental do seu convidado."); return; }
     if (gform.kind === "spin") {
       const usados = (student.guests || []).filter((g) => g.kind === "spin").length;
       if (usados >= 2) { setGErr("⚠️ Você já usou seus 2 convites de ALUNO CONVIDADO AO DESAFIO (📣)."); return; }
@@ -3459,7 +4082,7 @@ export default function App() {
       if (!s) return;
       if (!s.guests) s.guests = [];
       s.guests.push({
-        id: Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+        id: novoId(),
         name,
         date: gform.date,
         slot: gform.slot,
@@ -3764,10 +4387,14 @@ export default function App() {
               onKeyDown={(e) => e.key === "Enter" && tryLogin()}
               placeholder="Seu nome e sobrenome"
               className="w-full rounded-lg px-4 py-3 outline-none mb-2"
+              autoComplete="username"
+              name="username"
               style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream }}
             />
             <input
               type="password"
+              name="password"
+              autoComplete="current-password"
               value={loginPass}
               onChange={(e) => { setLoginPass(e.target.value); setLoginErr(""); }}
               onKeyDown={(e) => e.key === "Enter" && tryLogin()}
@@ -3832,6 +4459,8 @@ export default function App() {
                 <div className="mb-2" style={{ color: C.ok, fontSize: 12.5, fontWeight: 700 }}>✓ Identidade confirmada! Agora crie sua nova senha:</div>
                 <input
                   type="password"
+                  name="new-password"
+                  autoComplete="new-password"
                   autoFocus
                   value={rcPass}
                   onChange={(e) => { setRcPass(e.target.value); setRcErr(""); }}
@@ -4379,6 +5008,8 @@ export default function App() {
             </p>
             <input
               type="password"
+              name="password"
+              autoComplete={creating ? "new-password" : "current-password"}
               value={gatePass}
               autoFocus
               onChange={(e) => { setGatePass(e.target.value); setGateErr(""); }}
@@ -4589,6 +5220,27 @@ export default function App() {
           if (!(res.vertLines > 0 || res.horizLines > 0 || res.diagLines > 0 || res.full || res.corners || res.bought >= 4)) return null;
           return (
             <div className="flex flex-col gap-1 mb-3">
+              {res.full && (
+                <div className="rounded-lg px-4 py-4 mb-1" style={{ background: C.wineDeep, border: `2px solid ${C.amber}` }}>
+                  <div className="text-center" style={{ fontSize: 30, lineHeight: 1.1 }}>🎉🏆🎉</div>
+                  <div className="text-center mt-1" style={{ color: C.amber, fontWeight: 800, fontSize: 16, letterSpacing: "0.02em" }}>
+                    PARABÉNS, {(student.name || "").split(" ")[0].toUpperCase()}!
+                  </div>
+                  <div className="text-center mt-2" style={{ color: C.cream, fontSize: 12.5, lineHeight: 1.6 }}>
+                    Você fechou <b>as 9 missões</b> da cartela. Isso é constância, coragem e muita pedalada —
+                    e pouquíssima gente chega até aqui. Que orgulho da sua caminhada! 💙
+                  </div>
+                  <div className="mt-3 pt-3" style={{ borderTop: `1px solid ${C.line}` }}>
+                    <div style={{ color: C.amberSoft, fontSize: 12, fontWeight: 700, marginBottom: 4 }}>
+                      🎯 E agora, qual é a estratégia pro próximo desafio?
+                    </div>
+                    <div style={{ color: C.mut, fontSize: 11.5, lineHeight: 1.55 }}>
+                      Vem contar pra gente o que funcionou pra você — sua tática pode inspirar a turma inteira.
+                      Toque em 💬 AJUDA no rodapé e manda sua estratégia. 🚴‍♀️
+                    </div>
+                  </div>
+                </div>
+              )}
               {res.full && (
                 <div className="rounded-lg px-3 py-2 text-center" style={{ background: C.amber, color: C.bg, fontWeight: 700, fontSize: 13 }}>
                   {tag("full", "CARTELA CHEIA", "treinamento com os profs + 1 mês de aula ilimitado", "🏆", "Cartela Cheia completa!")}
@@ -5215,7 +5867,9 @@ export default function App() {
           {(admin || (student.pass && unlocks[student.id] === student.pass)) && (
           <div className="flex flex-col gap-2">
             <div style={{ color: C.mut, fontSize: 11.5, lineHeight: 1.5 }}>
-              📅 A data e o ⏰ horário abaixo são <b style={{ color: C.cream }}>da aula que o SEU CONVIDADO vai fazer</b> — a aula experimental que ele ganhou de você. A marcação é feita com a recepção (nome completo, telefone e e-mail dele).
+              {gform.kind === "spin"
+                ? <>📣 Este é um <b style={{ color: C.cream }}>aluno que já pedala na Spin</b> e você está convidando pro desafio. Informe só o <b style={{ color: C.cream }}>nome</b> e a <b style={{ color: C.cream }}>data do convite</b> — não precisa horário.</>
+                : <>📅 A data e o ⏰ horário abaixo são <b style={{ color: C.cream }}>da aula que o SEU CONVIDADO vai fazer</b> — a aula experimental que ele ganhou de você. A marcação é feita com a recepção (nome completo, telefone e e-mail dele).</>}
             </div>
             <input
               value={gform.name}
@@ -5226,7 +5880,7 @@ export default function App() {
             />
             <select
               value={gform.kind}
-              onChange={(e) => setGform({ ...gform, kind: e.target.value })}
+              onChange={(e) => setGform({ ...gform, kind: e.target.value, slot: e.target.value === "spin" ? "" : gform.slot })}
               className="rounded-lg px-3 py-2 outline-none"
               style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream }}
             >
@@ -5248,17 +5902,19 @@ export default function App() {
                 className="flex-1 rounded-lg px-3 py-2 outline-none"
                 style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream, colorScheme: "dark" }}
               />
-              <select
-                value={gform.slot}
-                onChange={(e) => setGform({ ...gform, slot: e.target.value })}
-                className="rounded-lg px-3 py-2 outline-none"
-                style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: gform.slot ? C.cream : C.mut }}
-              >
-                <option value="" disabled>— horário —</option>
-                {(gform.date && isWeekendDate(gform.date) ? WEEKEND_SLOTS : WEEKDAY_SLOTS).map((s) => (
-                  <option key={s} value={s}>{s.replace(":", "h")}</option>
-                ))}
-              </select>
+              {gform.kind !== "spin" && (
+                <select
+                  value={gform.slot}
+                  onChange={(e) => setGform({ ...gform, slot: e.target.value })}
+                  className="rounded-lg px-3 py-2 outline-none"
+                  style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: gform.slot ? C.cream : C.mut }}
+                >
+                  <option value="" disabled>— horário —</option>
+                  {(gform.date && isWeekendDate(gform.date) ? WEEKEND_SLOTS : WEEKDAY_SLOTS).map((s) => (
+                    <option key={s} value={s}>{s.replace(":", "h")}</option>
+                  ))}
+                </select>
+              )}
             </div>
             {gErr && <div style={{ color: "#C96A76", fontSize: 12 }}>{gErr}</div>}
             <button onClick={addGuest} className="rounded-lg py-2.5 font-bold" style={{ background: `linear-gradient(120deg, ${C.amber}, #16696F)`, color: C.cream }}>
