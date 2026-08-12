@@ -937,12 +937,12 @@ async function loadUso() {
 
 // Grava o "ping" de uma pessoa. Nunca apaga o histórico de ninguém:
 // só acrescenta/atualiza a entrada dela.
-async function registrarUso(sid, nome, track, tela) {
+async function registrarUso(sid, nome, track, tela, cartelaDe) {
   if (!sid) return;
   try {
     const atual = await loadUso();
     const agora = Date.now();
-    const e = atual[sid] || { nome, track, sessoes: 0, minutos: 0, telas: {}, primeiro: agora, ultimo: 0 };
+    const e = atual[sid] || { nome, track, sessoes: 0, minutos: 0, telas: {}, visitas: {}, primeiro: agora, ultimo: 0 };
     e.nome = nome || e.nome;
     e.track = track || e.track;
     // Sessão nova quando ficou mais de 30 min sem aparecer
@@ -950,10 +950,39 @@ async function registrarUso(sid, nome, track, tela) {
     if (gap > 30 * 60000) e.sessoes = (e.sessoes || 0) + 1;
     else e.minutos = Math.round(((e.minutos || 0) + gap / 60000) * 10) / 10;
     if (tela) e.telas[tela] = (e.telas[tela] || 0) + 1;
+    // Se está numa cartela que não é a dele, registra QUAL colega foi visitada
+    if (cartelaDe) {
+      if (!e.visitas) e.visitas = {};
+      e.visitas[cartelaDe] = (e.visitas[cartelaDe] || 0) + 1;
+    }
     e.ultimo = agora;
     atual[sid] = e;
     await window.storage.set(USO_KEY, JSON.stringify(atual), true);
   } catch { /* registro de uso é melhor esforço — nunca atrapalha o app */ }
+}
+
+// ---------- Entrega de prêmios (chave separada: nunca toca nos dados dos alunos) ----------
+const ENTREGAS_KEY = `${KEY_BASE}-entregas`;
+
+async function loadEntregas() {
+  try {
+    const r = await window.storage.get(ENTREGAS_KEY, true);
+    if (r && r.value) {
+      const u = JSON.parse(r.value);
+      if (u && typeof u === "object") return u;
+    }
+  } catch { /* sem registro ainda */ }
+  return {};
+}
+
+async function marcarEntrega(chave, valor) {
+  try {
+    const atual = await loadEntregas();
+    if (valor) atual[chave] = { ts: Date.now() };
+    else delete atual[chave];
+    await window.storage.set(ENTREGAS_KEY, JSON.stringify(atual), true);
+    return atual;
+  } catch { return null; }
 }
 
 async function loadAdminFlag() {
@@ -1174,6 +1203,7 @@ export default function App() {
   const [showPremios, setShowPremios] = useState(false);
   const [premiosData, setPremiosData] = useState(null);
   const [premiosLoading, setPremiosLoading] = useState(false);
+  const [entregasData, setEntregasData] = useState(null);
   const [premiosExpanded, setPremiosExpanded] = useState(null);
   const [confirmDelP, setConfirmDelP] = useState(null);
   const [impRes, setImpRes] = useState(null);
@@ -1229,18 +1259,26 @@ export default function App() {
   const telaAtual = () =>
     showPend ? "pendencias" : showCad ? "cadastros" : showMM ? "relampago"
     : showRel ? "relatorio" : showWins ? "desempenho" : showPremios ? "premios"
-    : showManual ? "manual" : showUso ? "uso" : view ? "cartela" : "inicio";
+    : showManual ? "manual" : showUso ? "uso" : view ? (spy ? "colega" : "cartela") : "inicio";
 
   useEffect(() => {
     if (!view || admin) return;
     const s = (data && data.students) ? data.students.find((x) => x.id === view) : null;
     if (!s) return;
-    registrarUso(view, s.name, track, telaAtual());
+    // Quem registra é sempre QUEM ESTÁ NAVEGANDO, não a dona da cartela visitada.
+    const meuId = myIds[track];
+    if (spy && !meuId) return; // visitante sem identidade neste aparelho: não registra em ninguém
+    const quemId = spy ? meuId : view;
+    const quemNome = spy
+      ? ((((data && data.students) || []).find((x) => x.id === meuId) || {}).name || "?")
+      : s.name;
+    const cartelaDe = spy ? s.name : null;
+    registrarUso(quemId, quemNome, track, telaAtual(), cartelaDe);
     const t = setInterval(() => {
-      registrarUso(view, s.name, track, telaAtual());
+      registrarUso(quemId, quemNome, track, telaAtual(), cartelaDe);
     }, 120000);
     return () => clearInterval(t);
-  }, [view, admin, track]);
+  }, [view, admin, track, spy, myIds]);
 
   // Liga o aviso de auto-restauração à interface
   useEffect(() => {
@@ -1770,6 +1808,91 @@ export default function App() {
         });
       });
     };
+    const hNorm = (s) => {
+      const d = String(s || "").replace(/[^0-9]/g, "");
+      if (d.length < 3 || d.length > 4) return "";
+      const hh = (d.length === 3 ? "0" + d[0] : d.slice(0, 2));
+      return hh + ":" + d.slice(-2);
+    };
+    const dNorm = (s) => {
+      const t = String(s || "").trim();
+      let m = t.match(/(\d{4})-(\d{2})-(\d{2})/);
+      if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+      m = t.match(/(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?/);
+      if (m) {
+        const ano = m[3] ? (m[3].length === 2 ? "20" + m[3] : m[3]) : "2026";
+        return `${ano}-${String(m[2]).padStart(2, "0")}-${String(m[1]).padStart(2, "0")}`;
+      }
+      return "";
+    };
+    const nomeBate = (a, b) => {
+      const x = norm(a), y = norm(b);
+      if (!x || !y) return false;
+      return x === y || x.includes(y) || y.includes(x);
+    };
+    const analisarArquivo = (file) => {
+      if (!file) return;
+      const fr = new FileReader();
+      fr.onload = () => {
+        let txt = "";
+        try {
+          const buf = new Uint8Array(fr.result);
+          txt = new TextDecoder("utf-8", { fatal: false }).decode(buf);
+          if (txt.includes("\uFFFD")) txt = new TextDecoder("iso-8859-1").decode(buf);
+        } catch { setImpRes({ erro: "Não consegui ler o arquivo." }); return; }
+        const linhas = txt.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+        const presencas = [];
+        linhas.forEach((l) => {
+          const low = norm(l);
+          if (low.includes("nome") && (low.includes("hora") || low.includes("data") || low.includes("telefone"))) return;
+          const sep = (l.match(/;/g) || []).length >= (l.match(/,/g) || []).length ? ";" : (l.includes("\t") ? "\t" : ",");
+          const cells = l.split(sep).map((c) => c.replace(/^"|"$/g, "").trim());
+          let nome = "", fone = "", dataA = "", hora = "";
+          cells.forEach((c) => {
+            if (!c) return;
+            if (!hora && hNorm(c) && /\d{1,2}[:h]?\d{2}/.test(c) && c.replace(/[^0-9]/g, "").length <= 4) { hora = hNorm(c); return; }
+            if (!dataA && dNorm(c) && /\d/.test(c) && (c.includes("/") || /\d{4}-\d{2}/.test(c))) { dataA = dNorm(c); return; }
+            const digs = c.replace(/[^0-9]/g, "");
+            if (!fone && digs.length >= 8 && digs.length <= 14 && digs.length >= c.replace(/[^a-zA-ZÀ-ú]/g, "").length) { fone = c; return; }
+            if (!nome && /[a-zA-ZÀ-ú]{2,}/.test(c)) { nome = c; return; }
+          });
+          if ((nome || fone) && dataA && hora) presencas.push({ nome, fone, dataA, hora });
+        });
+        if (!presencas.length) { setImpRes({ erro: "Nenhuma linha válida encontrada. O arquivo precisa ter colunas com Nome (ou Telefone), Data e Horário." }); return; }
+        const casos = [];
+        TRACKS.forEach((t) => {
+          const d = allData[t.id]; if (!d) return;
+          d.students.forEach((s) => {
+            (s.records || []).forEach((r) => {
+              if (r.status !== "pending" || r.alert) return;
+              const bate = presencas.some((pz) =>
+                pz.dataA === r.date && pz.hora === r.slot &&
+                ((pz.nome && nomeBate(pz.nome, s.name)) || (pz.fone && s.phone && phonesMatch(pz.fone, s.phone)))
+              );
+              if (bate) casos.push({ tid: t.id, sid: s.id, rid: r.id, nome: s.name, gr: t.short, data: r.date, slot: r.slot });
+            });
+          });
+        });
+        setImpRes({ presencas: presencas.length, casos });
+      };
+      fr.readAsArrayBuffer(file);
+    };
+    const aplicarImport = () => {
+      if (!impRes || !impRes.casos || !impRes.casos.length) return;
+      const porTid = {};
+      impRes.casos.forEach((c) => { (porTid[c.tid] = porTid[c.tid] || []).push(c); });
+      Object.entries(porTid).forEach(([tid, lista]) => {
+        mutateTrack(tid, (d) => {
+          lista.forEach((c) => {
+            const s = d.students.find((x) => x.id === c.sid);
+            const r = s && (s.records || []).find((x) => x.id === c.rid);
+            if (r && r.status === "pending" && !r.alert) r.status = "ok";
+          });
+        });
+      });
+      avisar(`🤖 ${impRes.casos.length} check-in${impRes.casos.length === 1 ? "" : "s"} validado${impRes.casos.length === 1 ? "" : "s"} pelo arquivo!`);
+      setImpRes(null);
+    };
     return (
       <div className="min-h-screen" style={{ ...pageVars, background: pageBg, fontFamily: "'Montserrat', sans-serif", transition: "background .4s" }}>
         {fonts}{modal}
@@ -1783,6 +1906,54 @@ export default function App() {
           </h2>
           <div style={{ color: C.mut, fontSize: 12, marginBottom: 12 }}>
             Valide um a um ou o grupo inteiro de uma vez. Atualiza sozinha a cada 30s.
+          </div>
+
+          <div className="rounded-xl p-4 mb-4" style={{ background: C.panel, border: `1.5px solid ${C.ok}66` }}>
+            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, letterSpacing: "0.25em", color: C.ok, textTransform: "uppercase", marginBottom: 4 }}>
+              🤖 Validação automática
+            </div>
+            <div style={{ color: C.mut, fontSize: 11.5, lineHeight: 1.6, marginBottom: 10 }}>
+              Importe o relatório de presenças do seu sistema (CSV com colunas <b style={{ color: C.cream }}>Nome; Telefone; Data; Horário</b> — em qualquer ordem).
+              Eu caso cada linha com as aulas pendentes por <b style={{ color: C.cream }}>(nome OU telefone) + data + horário</b>, tolerando maiúsculas, acentos, sobrenome a mais/a menos, +55, símbolos e formatos de hora.
+              Sinalizadas ⚠️ ficam de fora. Nada é gravado antes da sua confirmação.
+            </div>
+            {!impRes && (
+              <label className="block w-full rounded-lg py-3 text-center font-bold" style={{ background: C.ok, color: C.bg, fontSize: 13, cursor: "pointer" }}>
+                📂 Escolher arquivo do sistema (.csv)
+                <input type="file" accept=".csv,.txt,text/csv" style={{ display: "none" }}
+                  onChange={(e) => { analisarArquivo(e.target.files && e.target.files[0]); e.target.value = ""; }} />
+              </label>
+            )}
+            {impRes && impRes.erro && (
+              <div>
+                <div className="rounded-lg px-3 py-2 mb-2" style={{ background: "#B1556022", border: "1px solid #B15560", color: "#E8A0A8", fontSize: 12 }}>{impRes.erro}</div>
+                <button onClick={() => setImpRes(null)} className="rounded-lg px-3 py-1.5" style={{ color: C.mut, fontSize: 12, border: `1px solid ${C.line}` }}>tentar outro arquivo</button>
+              </div>
+            )}
+            {impRes && !impRes.erro && (
+              <div>
+                <div style={{ color: C.cream, fontSize: 12.5, lineHeight: 1.6, marginBottom: 8 }}>
+                  📄 {impRes.presencas} presença{impRes.presencas === 1 ? "" : "s"} no arquivo · <b style={{ color: C.ok }}>{impRes.casos.length} pendência{impRes.casos.length === 1 ? "" : "s"} casaram</b> e podem ser validadas:
+                </div>
+                <div className="flex flex-col gap-1 mb-2" style={{ maxHeight: 180, overflowY: "auto" }}>
+                  {impRes.casos.map((c, i) => (
+                    <div key={i} className="rounded px-2.5 py-1 flex items-center gap-2" style={{ background: C.panelSoft, fontSize: 11.5 }}>
+                      <span className="flex-1 min-w-0 truncate" style={{ color: C.cream, fontWeight: 700 }}>{c.nome}</span>
+                      <span className="shrink-0" style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: C.mut }}>{fmtBR(c.data)} {c.slot.replace(":", "h")} · {c.gr}</span>
+                    </div>
+                  ))}
+                  {impRes.casos.length === 0 && <div style={{ color: C.mut, fontSize: 12 }}>Nenhuma pendência casou — confira datas e horários do arquivo.</div>}
+                </div>
+                <div className="flex gap-2">
+                  {impRes.casos.length > 0 && (
+                    <button onClick={aplicarImport} className="flex-1 rounded-lg py-2.5 font-bold" style={{ background: C.ok, color: C.bg, fontSize: 13 }}>
+                      ✓ Validar {impRes.casos.length} agora
+                    </button>
+                  )}
+                  <button onClick={() => setImpRes(null)} className="rounded-lg px-4" style={{ color: C.mut, fontSize: 12, border: `1px solid ${C.line}` }}>cancelar</button>
+                </div>
+              </div>
+            )}
           </div>
 
           {TRACKS.map((t) => {
@@ -2252,19 +2423,20 @@ export default function App() {
     }
     const agora = Date.now();
     const TELA_NOME = {
-      inicio: "Início", cartela: "Cartela", pendencias: "Pendências", cadastros: "Cadastros",
+      inicio: "Início", cartela: "Própria cartela", colega: "Cartela de colega", pendencias: "Pendências", cadastros: "Cadastros",
       relampago: "Relâmpago", relatorio: "Relatório", desempenho: "Desempenho", premios: "Prêmios",
       manual: "Manual", uso: "Comportamento",
     };
     const linhas = Object.entries(usoData || {}).map(([sid, e]) => {
       const min = Math.round(e.minutos || 0);
       const top = Object.entries(e.telas || {}).sort((a, b) => b[1] - a[1]).slice(0, 3);
+      const visitas = Object.entries(e.visitas || {}).sort((a, b) => b[1] - a[1]).slice(0, 6);
       return {
         sid, nome: e.nome || "—", track: e.track,
         grupo: (TRACKS.find((t) => t.id === e.track) || {}).short || "—",
         sessoes: e.sessoes || 0, minutos: min, ultimo: e.ultimo || 0,
         online: agora - (e.ultimo || 0) < 5 * 60000,
-        telas: top,
+        telas: top, visitas,
       };
     });
     const online = linhas.filter((l) => l.online);
@@ -2388,6 +2560,11 @@ export default function App() {
                         {l.telas.map(([t, n]) => `${TELA_NOME[t] || t} (${n})`).join(" · ")}
                       </div>
                     )}
+                    {l.visitas && l.visitas.length > 0 && (
+                      <div style={{ color: C.amberSoft, fontSize: 10.5, marginTop: 2 }}>
+                        👀 entrou na cartela de: {l.visitas.map(([nm, n]) => `${nm} (${n})`).join(" · ")}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -2427,17 +2604,20 @@ export default function App() {
       });
       return { ...w, aulas, novos };
     });
-    const tot = { alunos: 0, aulas: 0, pend: 0, conv: 0, bought: 0 };
+    const tot = { alunos: 0, aulas: 0, pend: 0, conv: 0, convAmigo: 0, convAluno: 0, bought: 0 };
     const porGrupo = TRACKS.map((t) => {
       const d = allData[t.id];
       const alunos = d ? d.students.filter((s) => s.approved !== false).length : 0;
-      let aulas = 0, pend = 0, conv = 0, bought = 0;
+      let aulas = 0, pend = 0, conv = 0, convAmigo = 0, convAluno = 0, bought = 0;
       if (d) d.students.forEach((s) => {
         (s.records || []).forEach((r) => { if (r.status === "ok") aulas++; else if (r.status === "pending") pend++; });
-        (s.guests || []).forEach((g) => { if (g.status === "ok") conv++; if (g.boughtTs || g.bought) bought++; });
+        (s.guests || []).forEach((g) => {
+          if (g.status === "ok") { conv++; if (g.kind === "spin") convAluno++; else convAmigo++; }
+          if (g.boughtTs || g.bought) bought++;
+        });
       });
-      tot.alunos += alunos; tot.aulas += aulas; tot.pend += pend; tot.conv += conv; tot.bought += bought;
-      return { t, alunos, aulas, conv, bought };
+      tot.alunos += alunos; tot.aulas += aulas; tot.pend += pend; tot.conv += conv; tot.convAmigo += convAmigo; tot.convAluno += convAluno; tot.bought += bought;
+      return { t, alunos, aulas, conv, convAmigo, convAluno, bought };
     });
     const baixarCSV = (nome, linhas) => {
       const csv = "\ufeff" + linhas.map((l) => l.map((c) => `"${String(c == null ? "" : c).replace(/"/g, '""')}"`).join(";")).join("\n");
@@ -2454,6 +2634,7 @@ export default function App() {
       const alunosCSV = [["Grupo", "Nome", "WhatsApp", "Liberado", "Aulas validadas", "Pendentes", "Missões (de 9)"]];
       const convsCSV = [["Grupo", "Anfitrião", "Convidado", "Data", "Horário", "Status", "Tipo", "Fechou pacote 10+"]];
       const missoesCSV = [["Grupo", "Missão", "Meta", "Completaram", "A 1 de completar"]];
+      const horarioMap = {};
       const profMap = {};
       const prevM = MISSIONS;
       TRACKS.forEach((t) => {
@@ -2472,6 +2653,10 @@ export default function App() {
                 profMap[rr.instructor] = profMap[rr.instructor] || {};
                 profMap[rr.instructor][t.id] = (profMap[rr.instructor][t.id] || 0) + 1;
               }
+              const hk = `${t.id}|${rr.date}|${rr.slot}`;
+              if (!horarioMap[hk]) horarioMap[hk] = { grupo: t.short, data: rr.date, slot: rr.slot, profs: new Set(), alunos: [] };
+              if (rr.instructor) horarioMap[hk].profs.add(rr.instructor);
+              horarioMap[hk].alunos.push(s.name);
             } else if (rr.status === "pending") {
               pd++;
               pendA.push([t.short, s.name, fone, fmtBR(rr.date), rr.slot.replace(":", "h"), rr.instructor || "", rr.alert ? "SIM" : ""]);
@@ -2504,7 +2689,31 @@ export default function App() {
         });
         profsCSV.push([pr, "TOTAL", tt]);
       });
-      return { pendA, pendG, aulasCSV, alunosCSV, convsCSV, profsCSV, missoesCSV };
+      // Aulas por horário: uma linha por aula real (grupo+data+horário), com professor(es) e alunos daquele horário
+      const horarioCSV = [["Data", "Horário", "Grupo", "Professor(es)", "Qtde alunos", "Alunos"]];
+      Object.values(horarioMap)
+        .sort((a, b) => (a.data + a.slot < b.data + b.slot ? -1 : 1))
+        .forEach((h) => {
+          horarioCSV.push([fmtBR(h.data), h.slot.replace(":", "h"), h.grupo, [...h.profs].join(", ") || "—", h.alunos.length, h.alunos.join(", ")]);
+        });
+      // Missões e desafios concluídos: cada conquista que entrou na fila de prêmio, com data/hora e a pessoa
+      const PATL_REL = { horiz: "Linha Horizontal", vert: "Linha Vertical", diag: "Diagonal", corners: "4 Cantos", conv: "4 Conversões", full: "Cartela Cheia", bpm: "Giro de 175 BPM" };
+      const concluidasCSV = [["Grupo", "Tipo", "Conquista", "Aluno", "Data/Hora", "Posição na fila", "Ganhou prêmio"]];
+      TRACKS.forEach((t) => {
+        const d = allData[t.id]; if (!d) return;
+        const w = d.winners || {};
+        (TRACK_MISSIONS[t.id] || []).forEach((m) => {
+          ((w.missionQueues || {})[m.id] || []).forEach((e, i) => {
+            concluidasCSV.push([t.short, "Missão (shake)", m.name, e.name, e.ts ? fmtDT(e.ts) : (e.date ? fmtBR(e.date) : "—"), i + 1, i < 2 ? "sim" : "não (excedeu teto)"]);
+          });
+        });
+        Object.entries(PATL_REL).forEach(([k, label]) => {
+          ((w.placements || {})[k] || []).forEach((e, i) => {
+            concluidasCSV.push([t.short, "Padrão da cartela", label, e.name, e.ts ? fmtDT(e.ts) : (e.date ? fmtBR(e.date) : "—"), i + 1, i < 1 ? "sim" : "não (excedeu teto)"]);
+          });
+        });
+      });
+      return { pendA, pendG, aulasCSV, alunosCSV, convsCSV, profsCSV, missoesCSV, horarioCSV, concluidasCSV };
     })();
     const BtnCSV = ({ rotulo, n, arq, dados }) => (
       <button
@@ -2516,91 +2725,6 @@ export default function App() {
         <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: C.mut }}>{n} · baixar ⬇</span>
       </button>
     );
-    const hNorm = (s) => {
-      const d = String(s || "").replace(/[^0-9]/g, "");
-      if (d.length < 3 || d.length > 4) return "";
-      const hh = (d.length === 3 ? "0" + d[0] : d.slice(0, 2));
-      return hh + ":" + d.slice(-2);
-    };
-    const dNorm = (s) => {
-      const t = String(s || "").trim();
-      let m = t.match(/(\d{4})-(\d{2})-(\d{2})/);
-      if (m) return `${m[1]}-${m[2]}-${m[3]}`;
-      m = t.match(/(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?/);
-      if (m) {
-        const ano = m[3] ? (m[3].length === 2 ? "20" + m[3] : m[3]) : "2026";
-        return `${ano}-${String(m[2]).padStart(2, "0")}-${String(m[1]).padStart(2, "0")}`;
-      }
-      return "";
-    };
-    const nomeBate = (a, b) => {
-      const x = norm(a), y = norm(b);
-      if (!x || !y) return false;
-      return x === y || x.includes(y) || y.includes(x);
-    };
-    const analisarArquivo = (file) => {
-      if (!file) return;
-      const fr = new FileReader();
-      fr.onload = () => {
-        let txt = "";
-        try {
-          const buf = new Uint8Array(fr.result);
-          txt = new TextDecoder("utf-8", { fatal: false }).decode(buf);
-          if (txt.includes("\uFFFD")) txt = new TextDecoder("iso-8859-1").decode(buf);
-        } catch { setImpRes({ erro: "Não consegui ler o arquivo." }); return; }
-        const linhas = txt.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-        const presencas = [];
-        linhas.forEach((l) => {
-          const low = norm(l);
-          if (low.includes("nome") && (low.includes("hora") || low.includes("data") || low.includes("telefone"))) return;
-          const sep = (l.match(/;/g) || []).length >= (l.match(/,/g) || []).length ? ";" : (l.includes("\t") ? "\t" : ",");
-          const cells = l.split(sep).map((c) => c.replace(/^"|"$/g, "").trim());
-          let nome = "", fone = "", dataA = "", hora = "";
-          cells.forEach((c) => {
-            if (!c) return;
-            if (!hora && hNorm(c) && /\d{1,2}[:h]?\d{2}/.test(c) && c.replace(/[^0-9]/g, "").length <= 4) { hora = hNorm(c); return; }
-            if (!dataA && dNorm(c) && /\d/.test(c) && (c.includes("/") || /\d{4}-\d{2}/.test(c))) { dataA = dNorm(c); return; }
-            const digs = c.replace(/[^0-9]/g, "");
-            if (!fone && digs.length >= 8 && digs.length <= 14 && digs.length >= c.replace(/[^a-zA-ZÀ-ú]/g, "").length) { fone = c; return; }
-            if (!nome && /[a-zA-ZÀ-ú]{2,}/.test(c)) { nome = c; return; }
-          });
-          if ((nome || fone) && dataA && hora) presencas.push({ nome, fone, dataA, hora });
-        });
-        if (!presencas.length) { setImpRes({ erro: "Nenhuma linha válida encontrada. O arquivo precisa ter colunas com Nome (ou Telefone), Data e Horário." }); return; }
-        const casos = [];
-        TRACKS.forEach((t) => {
-          const d = allData[t.id]; if (!d) return;
-          d.students.forEach((s) => {
-            (s.records || []).forEach((r) => {
-              if (r.status !== "pending" || r.alert) return;
-              const bate = presencas.some((pz) =>
-                pz.dataA === r.date && pz.hora === r.slot &&
-                ((pz.nome && nomeBate(pz.nome, s.name)) || (pz.fone && s.phone && phonesMatch(pz.fone, s.phone)))
-              );
-              if (bate) casos.push({ tid: t.id, sid: s.id, rid: r.id, nome: s.name, gr: t.short, data: r.date, slot: r.slot });
-            });
-          });
-        });
-        setImpRes({ presencas: presencas.length, casos });
-      };
-      fr.readAsArrayBuffer(file);
-    };
-    const aplicarImport = () => {
-      if (!impRes || !impRes.casos || !impRes.casos.length) return;
-      const porTid = {};
-      impRes.casos.forEach((c) => { (porTid[c.tid] = porTid[c.tid] || []).push(c); });
-      Object.entries(porTid).forEach(([tid, lista]) => {
-        mutateTrack(tid, (d) => {
-          lista.forEach((c) => {
-            const s = d.students.find((x) => x.id === c.sid);
-            const r = s && (s.records || []).find((x) => x.id === c.rid);
-            if (r && r.status === "pending" && !r.alert) r.status = "ok";
-          });
-        });
-      });
-      avisar(`🤖 ${impRes.casos.length} check-in${impRes.casos.length === 1 ? "" : "s"} validado${impRes.casos.length === 1 ? "" : "s"} pelo arquivo!`);
-      setImpRes(null);
-    };
     const Row = ({ a, b, forte }) => (
       <div className="flex justify-between items-baseline" style={{ fontSize: 12.5, lineHeight: 1.9, color: forte ? C.cream : C.mut, fontWeight: forte ? 800 : 500 }}>
         <span>{a}</span>
@@ -2631,6 +2755,8 @@ export default function App() {
           <div className="rounded-xl p-4 mb-3" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
             <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, letterSpacing: "0.25em", color: C.oak, textTransform: "uppercase", marginBottom: 6 }}>Convidados</div>
             <Row a="Aulas experimentais validadas" b={String(tot.conv)} forte />
+            <Row a="🧑‍🤝‍🧑 Amigos convidados (indicação livre)" b={String(tot.convAmigo)} />
+            <Row a="📣 Alunos convidados ao desafio (limite 2)" b={String(tot.convAluno)} />
             <Row a="🧸 Fecharam pacote 10+" b={String(tot.bought)} forte />
           </div>
           <div className="rounded-xl p-4" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
@@ -2668,54 +2794,12 @@ export default function App() {
               <BtnCSV rotulo="📣 Convidados e conversões" n={REL.convsCSV.length - 1} arq="convidados" dados={REL.convsCSV} />
               <BtnCSV rotulo="🧑‍🏫 Aulas por professor" n={REL.profsCSV.length - 1} arq="professores" dados={REL.profsCSV} />
               <BtnCSV rotulo="🎯 Missões por desafio" n={REL.missoesCSV.length - 1} arq="missoes" dados={REL.missoesCSV} />
+              <BtnCSV rotulo="🕐 Aulas por horário (com professor)" n={REL.horarioCSV.length - 1} arq="aulas-por-horario" dados={REL.horarioCSV} />
+              <BtnCSV rotulo="🏅 Missões e desafios concluídos" n={REL.concluidasCSV.length - 1} arq="conquistas" dados={REL.concluidasCSV} />
             </div>
-          </div>
-          <div className="rounded-xl p-4 mt-3" style={{ background: C.panel, border: `1.5px solid ${C.ok}66` }}>
-            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, letterSpacing: "0.25em", color: C.ok, textTransform: "uppercase", marginBottom: 4 }}>
-              🤖 Validação automática
+            <div style={{ color: C.mut, fontSize: 10, lineHeight: 1.5, marginTop: 8 }}>
+              "Missões e desafios concluídos" mostra a fila de cada prêmio na ordem de conquista. A coluna "Ganhou prêmio" aplica o teto por missão/padrão isoladamente — para o teto real por aluno (2 shakes e 1 padrão no total), confira também a página 🏆 Missões Concluídas.
             </div>
-            <div style={{ color: C.mut, fontSize: 11.5, lineHeight: 1.6, marginBottom: 10 }}>
-              Importe o relatório de presenças do seu sistema (CSV com colunas <b style={{ color: C.cream }}>Nome; Telefone; Data; Horário</b> — em qualquer ordem).
-              Eu caso cada linha com as aulas pendentes por <b style={{ color: C.cream }}>(nome OU telefone) + data + horário</b>, tolerando maiúsculas, acentos, sobrenome a mais/a menos, +55, símbolos e formatos de hora.
-              Sinalizadas ⚠️ ficam de fora. Nada é gravado antes da sua confirmação.
-            </div>
-            {!impRes && (
-              <label className="block w-full rounded-lg py-3 text-center font-bold" style={{ background: C.ok, color: C.bg, fontSize: 13, cursor: "pointer" }}>
-                📂 Escolher arquivo do sistema (.csv)
-                <input type="file" accept=".csv,.txt,text/csv" style={{ display: "none" }}
-                  onChange={(e) => { analisarArquivo(e.target.files && e.target.files[0]); e.target.value = ""; }} />
-              </label>
-            )}
-            {impRes && impRes.erro && (
-              <div>
-                <div className="rounded-lg px-3 py-2 mb-2" style={{ background: "#B1556022", border: "1px solid #B15560", color: "#E8A0A8", fontSize: 12 }}>{impRes.erro}</div>
-                <button onClick={() => setImpRes(null)} className="rounded-lg px-3 py-1.5" style={{ color: C.mut, fontSize: 12, border: `1px solid ${C.line}` }}>tentar outro arquivo</button>
-              </div>
-            )}
-            {impRes && !impRes.erro && (
-              <div>
-                <div style={{ color: C.cream, fontSize: 12.5, lineHeight: 1.6, marginBottom: 8 }}>
-                  📄 {impRes.presencas} presença{impRes.presencas === 1 ? "" : "s"} no arquivo · <b style={{ color: C.ok }}>{impRes.casos.length} pendência{impRes.casos.length === 1 ? "" : "s"} casaram</b> e podem ser validadas:
-                </div>
-                <div className="flex flex-col gap-1 mb-2" style={{ maxHeight: 180, overflowY: "auto" }}>
-                  {impRes.casos.map((c, i) => (
-                    <div key={i} className="rounded px-2.5 py-1 flex items-center gap-2" style={{ background: C.panelSoft, fontSize: 11.5 }}>
-                      <span className="flex-1 min-w-0 truncate" style={{ color: C.cream, fontWeight: 700 }}>{c.nome}</span>
-                      <span className="shrink-0" style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: C.mut }}>{fmtBR(c.data)} {c.slot.replace(":", "h")} · {c.gr}</span>
-                    </div>
-                  ))}
-                  {impRes.casos.length === 0 && <div style={{ color: C.mut, fontSize: 12 }}>Nenhuma pendência casou — confira datas e horários do arquivo.</div>}
-                </div>
-                <div className="flex gap-2">
-                  {impRes.casos.length > 0 && (
-                    <button onClick={aplicarImport} className="flex-1 rounded-lg py-2.5 font-bold" style={{ background: C.ok, color: C.bg, fontSize: 13 }}>
-                      ✓ Validar {impRes.casos.length} agora
-                    </button>
-                  )}
-                  <button onClick={() => setImpRes(null)} className="rounded-lg px-4" style={{ color: C.mut, fontSize: 12, border: `1px solid ${C.line}` }}>cancelar</button>
-                </div>
-              </div>
-            )}
           </div>
           {footerNote}
           <div className="flex justify-center pb-8">{helpBtn}</div>
@@ -3381,6 +3465,18 @@ export default function App() {
   // ---------- Escolha do desafio ----------
   // ---------- Página pública: Missões e Prêmios Concluídos ----------
   if (showPremios) {
+    if (admin && !entregasData) {
+      loadEntregas().then((e) => setEntregasData(e)).catch(() => setEntregasData({}));
+    }
+    const toggleEntrega = (chave) => {
+      const jaEntregue = !!(entregasData && entregasData[chave]);
+      setEntregasData((prev) => {
+        const novo = { ...(prev || {}) };
+        if (jaEntregue) delete novo[chave]; else novo[chave] = { ts: Date.now() };
+        return novo;
+      });
+      marcarEntrega(chave, !jaEntregue);
+    };
     const PATL = {
       horiz: { label: "Linha Horizontal", prize: "Camiseta Spincycle", emoji: "👕" },
       vert:  { label: "Linha Vertical",   prize: "Camiseta Spincycle", emoji: "👕" },
@@ -3499,7 +3595,10 @@ export default function App() {
                     {aberto && (
                       <div className="px-4 pb-3 flex flex-col gap-1.5">
                         <div style={{ height: 1, background: C.line, marginBottom: 6 }} />
-                        {g.lista.map((e) => (
+                        {g.lista.map((e) => {
+                          const chave = `${g.id}::${e.pos}::${e.nome}`;
+                          const entregue = !!(entregasData && entregasData[chave]);
+                          return (
                           <div key={e.pos} className="flex items-center gap-3 rounded-lg px-3 py-2" style={{ background: C.panelSoft }}>
                             <div style={{
                               width: 28, height: 28, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center",
@@ -3515,8 +3614,23 @@ export default function App() {
                                 {e.ts ? fmtDT(e.ts) : e.date ? fmtBR(e.date) : "—"}
                               </div>
                             </div>
+                            {admin && (
+                              <button
+                                onClick={() => toggleEntrega(chave)}
+                                className="rounded-lg px-2.5 py-1.5 shrink-0 font-bold"
+                                style={{
+                                  fontSize: 11,
+                                  background: entregue ? C.ok + "22" : "transparent",
+                                  border: `1px solid ${entregue ? C.ok : C.line}`,
+                                  color: entregue ? C.ok : C.mut,
+                                }}
+                              >
+                                {entregue ? "✅ Entregue" : "◻️ Marcar entrega"}
+                              </button>
+                            )}
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </div>
