@@ -4,23 +4,26 @@ import { createRoot } from "react-dom/client";
 import App from "./App.jsx";
 import Comunidade from "./Comunidade.jsx";
 
-// ============================================================
-// PORTA SECRETA DA COMUNIDADE
-// Para entrar: https://desafio.spincycleprudente.com.br/#/rt-oculto-0813
-// (troque o caminho abaixo por um só seu antes de divulgar)
-// ============================================================
-const CAMINHO_SECRETO = "#/rt-oculto-0813";
+// ── Portas do prédio ─────────────────────────────────────────────
+// 1) arenaspin.com.br (e www)             → COMUNIDADE (casa nova)
+// 2) comunidade.spincycleprudente.com.br  → COMUNIDADE (se um dia criar)
+// 3) caminho secreto no domínio do Desafio → COMUNIDADE (preview antigo)
+// 4) qualquer outro endereço              → DESAFIO, como sempre
+// Futuro (fase 3): desafio.arenaspin.com → Desafio (já previsto abaixo)
 
-const ehComunidade = () =>
-  window.location.hash.startsWith(CAMINHO_SECRETO) ||
-  window.location.hostname.startsWith("comunidade.");
+const CAMINHO_SECRETO = "#/rt-oculto-0813"; // TROQUE pelo seu
 
-// Se o endereço mudar com o app já aberto (ex.: colar o link na mesma aba),
-// recarrega a página para trocar entre Desafio e Comunidade na hora.
-window.addEventListener("hashchange", () => window.location.reload());
+const h = window.location.hostname;
+const ehArenaSpin = h === "arenaspin.com.br" || h === "www.arenaspin.com.br";
+const ehDesafioNaArena = h.startsWith("desafio.") || h.startsWith("missoes.");
+
+const ehComunidade =
+  (ehArenaSpin && !ehDesafioNaArena) ||
+  h.startsWith("comunidade.") ||
+  window.location.hash.startsWith(CAMINHO_SECRETO);
 
 createRoot(document.getElementById("root")).render(
   <React.StrictMode>
-    {ehComunidade() ? <Comunidade /> : <App />}
+    {ehComunidade ? <Comunidade /> : <App />}
   </React.StrictMode>
 );
