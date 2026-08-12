@@ -2656,7 +2656,7 @@ export default function App() {
               const hk = `${t.id}|${rr.date}|${rr.slot}`;
               if (!horarioMap[hk]) horarioMap[hk] = { grupo: t.short, data: rr.date, slot: rr.slot, profs: new Set(), alunos: [] };
               if (rr.instructor) horarioMap[hk].profs.add(rr.instructor);
-              horarioMap[hk].alunos.push(s.name);
+              horarioMap[hk].alunos.push({ nome: s.name, reg: rr.reg || null });
             } else if (rr.status === "pending") {
               pd++;
               pendA.push([t.short, s.name, fone, fmtBR(rr.date), rr.slot.replace(":", "h"), rr.instructor || "", rr.alert ? "SIM" : ""]);
@@ -2689,12 +2689,24 @@ export default function App() {
         });
         profsCSV.push([pr, "TOTAL", tt]);
       });
-      // Aulas por horário: uma linha por aula real (grupo+data+horário), com professor(es) e alunos daquele horário
-      const horarioCSV = [["Data", "Horário", "Grupo", "Professor(es)", "Qtde alunos", "Alunos"]];
+      // Aulas por horário: uma LINHA POR ALUNO (fácil de filtrar/ordenar no Excel), com o horário exato do check-in (com segundos)
+      const fmtHMS = (ts) => {
+        if (!ts) return "";
+        const d = new Date(ts);
+        const p = (n) => String(n).padStart(2, "0");
+        return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+      };
+      const horarioCSV = [["Data", "Horário da aula", "Grupo", "Professor(es)", "Aluno", "Check-in registrado às"]];
       Object.values(horarioMap)
         .sort((a, b) => (a.data + a.slot < b.data + b.slot ? -1 : 1))
         .forEach((h) => {
-          horarioCSV.push([fmtBR(h.data), h.slot.replace(":", "h"), h.grupo, [...h.profs].join(", ") || "—", h.alunos.length, h.alunos.join(", ")]);
+          const profsTxt = [...h.profs].join(", ") || "—";
+          h.alunos
+            .slice()
+            .sort((a, b) => (a.reg || 0) - (b.reg || 0))
+            .forEach((al) => {
+              horarioCSV.push([fmtBR(h.data), h.slot.replace(":", "h"), h.grupo, profsTxt, al.nome, fmtHMS(al.reg)]);
+            });
         });
       // Missões e desafios concluídos: cada conquista que entrou na fila de prêmio, com data/hora e a pessoa
       const PATL_REL = { horiz: "Linha Horizontal", vert: "Linha Vertical", diag: "Diagonal", corners: "4 Cantos", conv: "4 Conversões", full: "Cartela Cheia", bpm: "Giro de 175 BPM" };
@@ -3499,15 +3511,19 @@ export default function App() {
           const id = `shake-${t.id}-${m.id}`;
           grupos.push({
             id, emoji: "🥤", label: `Shake — ${m.name}`, prize: "Shake do mês", grupo: t.short,
+            entregavel: true,
             lista: q.map((e, i) => ({ pos: i + 1, nome: e.name, ts: e.ts, date: e.date })),
           });
         });
-        // Padrões
+        // Padrões — só entram no botão de entrega os prêmios físicos/tangíveis (camiseta, bolsinha, aula temática, treinamento).
+        // "Aula fechada para 33 convidados" (bpm) fica de fora: não é retirada na recepção.
+        const ENTREGAVEIS_PADRAO = new Set(["horiz", "vert", "diag", "corners", "conv", "full"]);
         Object.entries(PATL).forEach(([k, info]) => {
           const arr = (w.placements || {})[k] || [];
           if (arr.length === 0) return;
           grupos.push({
             id: `pat-${t.id}-${k}`, emoji: info.emoji, label: info.label, prize: info.prize, grupo: t.short,
+            entregavel: ENTREGAVEIS_PADRAO.has(k),
             lista: arr.map((e, i) => ({ pos: i + 1, nome: e.name, ts: e.ts, date: e.date })),
           });
         });
@@ -3614,7 +3630,7 @@ export default function App() {
                                 {e.ts ? fmtDT(e.ts) : e.date ? fmtBR(e.date) : "—"}
                               </div>
                             </div>
-                            {admin && (
+                            {admin && g.entregavel && e.pos === 1 && (
                               <button
                                 onClick={() => toggleEntrega(chave)}
                                 className="rounded-lg px-2.5 py-1.5 shrink-0 font-bold"
@@ -5673,6 +5689,20 @@ export default function App() {
                   return chip(`⚡ ${posV}º · ${x.name}`, "mm" + x.id, true);
                 })}
               </div>
+              {meusShakes.length > 0 && (
+                <div className="rounded-lg px-3 py-2 mt-2.5" style={{ background: `${C.amber}18`, border: `1px solid ${C.amber}55` }}>
+                  <div style={{ color: C.amberSoft, fontWeight: 700, fontSize: 12, lineHeight: 1.5 }}>
+                    🥤 Parabéns! Para retirar seu shake, apresente essa página na Spin Coffee &amp; Shakes.
+                  </div>
+                </div>
+              )}
+              {(meusPats.length > 0 || vencidas.length > 0) && (
+                <div className="rounded-lg px-3 py-2 mt-2.5" style={{ background: `${C.oak}18`, border: `1px solid ${C.oak}55` }}>
+                  <div style={{ color: C.oak, fontWeight: 700, fontSize: 12, lineHeight: 1.5 }}>
+                    🎁 Apresente essa página na recepção e retire seu prêmio.
+                  </div>
+                </div>
+              )}
             </div>
           );
         })()}
