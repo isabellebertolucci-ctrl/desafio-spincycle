@@ -346,9 +346,16 @@ async function gravarLocal(key, obj) {
 
 // ---------- Arena: catálogo de desafios e jogos ----------
 // status: "andamento" | "breve" | "encerrado"
+// 🏟️ A ESTANTE DA ARENA — contrato de dados (ver ARQUITETURA-ARENA.md)
+// Cada desafio guarda-se nas próprias gavetas; a Comunidade só lê o padrão.
+const K_ARENA = {
+  catalogo: `spincycle-arena-${UNIDADE}-catalogo`,
+  gaveta: (desafioId, g) => `spincycle-arena-${UNIDADE}-${desafioId}-${g}`,
+};
+
 const DESAFIOS_PADRAO = [
   {
-    id: "missoes", nome: "DESAFIO DAS MISSÕES", status: "andamento",
+    id: "missoes-2026a", nome: "DESAFIO DAS MISSÕES", status: "andamento", legado: true,
     periodo: "05/AGO A 20/SET", icone: "urso",
     resumo: "Cartela de 9 missões estilo bingo. Feche linhas, vire Madrugador, traga convidados e dispute o ranking.",
     url: DESAFIO_URL, cta: "ENTRAR NO DESAFIO",
@@ -1127,6 +1134,15 @@ function TelaLogin({ allData, carregando, onEntrar, entrarDemo, onParceiro, admi
             onKeyDown={(e) => { if (e.key === "Enter") tentar(); }} />
           {erro && <div style={{ color: "#E08585", fontSize: 12.5 }}>{erro}</div>}
           <button style={btnPrimario()} onClick={tentar}>ENTRAR</button>
+          {adminLiberado && (
+            <button onClick={entrarStaff} style={{
+              ...btnFantasma(), width: "100%",
+              border: `1px solid ${C.oak}77`, borderRadius: 10, padding: "12px",
+              color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 0.5,
+            }}>
+              🔑 ENTRAR NA ADMINISTRAÇÃO (sem perfil de aluno)
+            </button>
+          )}
           <a href={DESAFIO_URL} target="_blank" rel="noreferrer" style={{ ...btnFantasma(), textAlign: "center", textDecoration: "none" }}>
             Ainda não tem cadastro? Cadastre-se no app do Desafio →
           </a>
@@ -1238,6 +1254,8 @@ export default function App() {
   const [adminInfo, setAdminInfo] = useState(null); // { usuario, super, perms, unidade }
   const [adminsReg, setAdminsReg] = useState([]);   // admins cadastrados pela dona
   const [presenca, setPresenca] = useState({});     // { chave: ts } — batimento de quem está online
+  const [arenaCat, setArenaCat] = useState(null);   // catálogo da Arena no banco (null = ainda não existe)
+  const [arenaDados, setArenaDados] = useState({}); // { desafioId: { participantes, eventos, conquistas } }
   const metrBuf = useRef({ entradas: 0, min: 0, telas: {}, parceiros: {}, sujo: false });
   const [torcida, setTorcida] = useState({});      // { chaveAlvo: [chaveTorcedor, ...] }
   const [comentarios, setComentarios] = useState({}); // { postId: [{id, ts, texto, autorNome, autorChave}] }
@@ -1315,6 +1333,27 @@ export default function App() {
     if (cm !== undefined) setComentarios(cm || {});
     if (it !== undefined) setInstantes(Array.isArray(it) ? it : []);
     if (rd !== undefined) setRecados(rd || {});
+
+    // 🏟️ A estante: catálogo + gavetas de cada desafio cadastrado
+    const cat = await lerShared(K_ARENA.catalogo, null);
+    if (cat !== undefined) {
+      setArenaCat(cat);
+      const lista = ((cat && cat.desafios) || []).filter((d) => !d.legado);
+      const dados = {};
+      await Promise.all(lista.map(async (d) => {
+        const [pt, ev, cq] = await Promise.all([
+          lerShared(K_ARENA.gaveta(d.id, "participantes"), {}),
+          lerShared(K_ARENA.gaveta(d.id, "eventos"), []),
+          lerShared(K_ARENA.gaveta(d.id, "conquistas"), {}),
+        ]);
+        dados[d.id] = {
+          participantes: pt || {},
+          eventos: Array.isArray(ev) ? ev : [],
+          conquistas: cq || {},
+        };
+      }));
+      setArenaDados(dados);
+    }
   };
   const carregarFotos = async () => {
     if (demoRef.current) return;
@@ -1383,6 +1422,23 @@ export default function App() {
     const tp = setInterval(() => { batimentoPresenca(); }, 60000);
     return () => { clearInterval(t); clearInterval(tm); clearInterval(tp); };
   }, []);
+
+  const prateleirasSemeadas = useRef(false);
+  useEffect(() => {
+    // Cria o catálogo no banco na primeira visita da dona (prateleiras vazias + vitrine atual)
+    const semear = async () => {
+      if (!adminSuper || demo || prateleirasSemeadas.current) return;
+      if (arenaCat !== null) return; // já existe (ou ainda carregando: undefined nunca chega aqui)
+      prateleirasSemeadas.current = true;
+      const inicial = { desafios: DESAFIOS_PADRAO.map((d) => ({ ...d })) };
+      try {
+        await gravarShared(K_ARENA.catalogo, inicial);
+        setArenaCat(inicial);
+        avisar("🏟️ Prateleiras da Arena criadas no banco.");
+      } catch { prateleirasSemeadas.current = false; }
+    };
+    if (!carregando) semear();
+  }, [carregando, adminSuper, arenaCat]);
 
   const batimentoPresenca = async () => {
     const s = sessaoRef.current;
@@ -2108,7 +2164,21 @@ export default function App() {
 
   const renderPost = (e, extra = {}) => <PostCard key={e.id} {...postProps(e)} {...extra} />;
 
-  const feedRadar = gerarEventos(allData, gdata);
+  const feedRadarLegado = gerarEventos(allData, gdata);
+  const eventosArena = Object.values(arenaDados).flatMap((d) => d.eventos).map((e) => {
+    const [tk, ...r] = (e.chave || "").split(":");
+    return { id: e.id, ts: e.ts, titulo: e.titulo, corpo: e.corpo, track: tk || undefined, sid: r.join(":") || undefined };
+  });
+  const feedRadar = [...feedRadarLegado, ...eventosArena].sort((a, b) => b.ts - a.ts);
+  // Carimbos e participações vindos da estante, por pessoa
+  const carimbosArenaDe = (chave) => Object.values(arenaDados).flatMap((d) => (d.conquistas[chave] || []));
+  const participacoesArenaDe = (chave) => {
+    const cat = (arenaCat && arenaCat.desafios) || [];
+    return cat.filter((d) => !d.legado).map((d) => {
+      const p = ((arenaDados[d.id] || {}).participantes || {})[chave];
+      return p ? { id: d.id, nome: d.nome, placar: p.placar || "", status: d.status, icone: d.icone } : null;
+    }).filter(Boolean);
+  };
   // Vitrine do mural: posts de aluno dentro da janela; oficiais não expiram
   const muralVisivel = muralAlunos.filter((p) => p.tipo === "oficial" || p.tipo === "campanha" || Date.now() - p.ts < JANELA_MURAL_DIAS * dayMs);
   const feedMisto = [...feedRadar, ...muralVisivel].sort((a, b) => b.ts - a.ts);
@@ -2258,7 +2328,7 @@ export default function App() {
         {!recolhidos.arena && <button style={{ ...btnFantasma(), fontSize: 12 }} onClick={() => setTela("arena")}>VER TODOS ›</button>}
       </div>
       {!recolhidos.arena && (() => {
-        const lista = config.desafios || DESAFIOS_PADRAO;
+        const lista = (arenaCat && arenaCat.desafios && arenaCat.desafios.length ? arenaCat.desafios : null) || config.desafios || DESAFIOS_PADRAO;
         const fixado = lista.find((d) => d.status === "andamento") || lista[0];
         if (!fixado) return null;
         return (
@@ -2286,7 +2356,7 @@ export default function App() {
         const trilhaMeu = TRACKS.find((t) => t.id === sessao.track);
         const alunoMeu = (((allData[sessao.track] || {}).students) || []).find((s) => s.id === sessao.sid);
         const progMeu = alunoMeu && trilhaMeu ? computeProgress(alunoMeu, trilhaMeu.targets) : null;
-        const meusCarimbos = calcularCarimbos(progMeu);
+        const meusCarimbos = [...calcularCarimbos(progMeu), ...(sessao.staff ? [] : carimbosArenaDe(`${sessao.track}:${sessao.sid}`))];
         if (!meusCarimbos.length) return null;
         return (
           <div style={{ marginTop: 14 }}>
@@ -2447,6 +2517,8 @@ export default function App() {
       torcida={torcida} torcer={torcer} minhaChave={minhaChave}
       recados={recados} deixarRecado={deixarRecado} apagarRecado={apagarRecado} admin={adminSuper || !!adminPerms.excluirRecados}
       avisar={avisar} renderPost={renderPost}
+      carimbosExtra={carimbosArenaDe(`${perfilVisto.track}:${perfilVisto.sid}`)}
+      arenaParticipacoes={participacoesArenaDe(`${perfilVisto.track}:${perfilVisto.sid}`)}
       irEditar={() => setTela("perfil")}
       voltar={() => setTela("inicio")}
     />
@@ -2454,7 +2526,7 @@ export default function App() {
 
   // ---------- Arena ----------
   const telaArena = (
-    <TelaArena desafios={config.desafios || DESAFIOS_PADRAO} voltar={() => setTela("inicio")} />
+    <TelaArena desafios={(arenaCat && arenaCat.desafios && arenaCat.desafios.length ? arenaCat.desafios : null) || config.desafios || DESAFIOS_PADRAO} voltar={() => setTela("inicio")} />
   );
 
   // ---------- Busca (palavras e pessoas no feed) ----------
@@ -2618,6 +2690,15 @@ function TelaEmBreve({ liberar, adminsReg }) {
             onKeyDown={(e) => { if (e.key === "Enter") tentar(); }} />
           {erro && <div style={{ color: "#E08585", fontSize: 12 }}>{erro}</div>}
           <button style={btnPrimario()} onClick={tentar}>ENTRAR</button>
+          {adminLiberado && (
+            <button onClick={entrarStaff} style={{
+              ...btnFantasma(), width: "100%",
+              border: `1px solid ${C.oak}77`, borderRadius: 10, padding: "12px",
+              color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 0.5,
+            }}>
+              🔑 ENTRAR NA ADMINISTRAÇÃO (sem perfil de aluno)
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -3226,7 +3307,7 @@ function TelaInstantes({ instantes, minhaChave, admin, postar, apagar, renderPos
 }
 
 // ---------- Página pública do aluno (estilo perfil de rede social) ----------
-function TelaPerfilAluno({ track, sid, allData, perfis, fotos, muralVisivel, feedRadar, ehMeu, torcida, torcer, minhaChave, recados, deixarRecado, apagarRecado, admin, avisar, irEditar, renderPost, voltar }) {
+function TelaPerfilAluno({ track, sid, allData, perfis, fotos, muralVisivel, feedRadar, ehMeu, torcida, torcer, minhaChave, recados, deixarRecado, apagarRecado, admin, avisar, irEditar, renderPost, carimbosExtra = [], arenaParticipacoes = [], voltar }) {
   const [novoRec, setNovoRec] = useState("");
   const chave = `${track}:${sid}`;
   const trilha = TRACKS.find((t) => t.id === track);
@@ -3248,7 +3329,7 @@ function TelaPerfilAluno({ track, sid, allData, perfis, fotos, muralVisivel, fee
   const euTorco = torcedores.includes(minhaChave);
 
   // Carimbos: as missões cumpridas + conquistas especiais
-  const carimbos = calcularCarimbos(prog);
+  const carimbos = [...calcularCarimbos(prog), ...carimbosExtra];
   // Últimas: o que falaram dele (Radar) + o que ele escreveu, em ordem
   const meusPosts = muralVisivel.filter((p) => p.autorChave === chave);
   const sobreEle = feedRadar.filter((e) => e.sid === sid && e.track === track);
@@ -3325,7 +3406,19 @@ function TelaPerfilAluno({ track, sid, allData, perfis, fotos, muralVisivel, fee
             </div>
             <span style={{ color: C.ok, fontSize: 9, fontWeight: 800, border: `1px solid ${C.ok}66`, borderRadius: 6, padding: "1px 6px", letterSpacing: 0.4 }}>EM ANDAMENTO</span>
           </Painel>
-        ) : (
+        ) : null}
+        {arenaParticipacoes.map((d) => (
+          <Painel key={d.id} style={{ textAlign: "center", padding: "16px 8px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 7 }}>
+            <span style={{ fontSize: 26 }}>{/^\p{Emoji}/u.test(d.icone || "") ? d.icone : "🎖️"}</span>
+            <div style={{ fontWeight: 800, fontSize: 10.5, letterSpacing: 0.4, lineHeight: 1.3 }}>{d.nome}</div>
+            {d.placar && <div style={{ color: C.mut, fontSize: 10.5, lineHeight: 1.4 }}>{d.placar}</div>}
+            <span style={{
+              color: d.status === "encerrado" ? C.mut : C.ok, fontSize: 9, fontWeight: 800,
+              border: `1px solid ${d.status === "encerrado" ? C.mut : C.ok}66`, borderRadius: 6, padding: "1px 6px", letterSpacing: 0.4,
+            }}>{d.status === "encerrado" ? "ENCERRADO" : "EM ANDAMENTO"}</span>
+          </Painel>
+        ))}
+        {!(participa && prog) && arenaParticipacoes.length === 0 && (
           <Painel style={{ textAlign: "center", padding: "16px 8px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, opacity: 0.6 }}>
             <div style={{ color: C.mut, fontSize: 11, lineHeight: 1.4 }}>Ainda fora dos desafios 🚴</div>
           </Painel>
