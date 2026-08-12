@@ -1180,7 +1180,7 @@ function TelaLogin({ allData, carregando, onEntrar, entrarDemo, onParceiro, admi
 }
 
 // ---------- Novo Post (aba do Mural) ----------
-function NovoPost({ publicar, admin }) {
+function NovoPost({ publicar, podeOficial }) {
   const [texto, setTexto] = useState("");
   const [foto, setFoto] = useState(null);
   const [comoOficial, setComoOficial] = useState(false);
@@ -1188,13 +1188,13 @@ function NovoPost({ publicar, admin }) {
   return (
     <div style={{ display: "grid", gap: 10 }}>
       <div style={{ color: C.mut, fontSize: 12.5, lineHeight: 1.5 }}>
-        {(adminSuper || adminPerms.postarFeed || FOTOS_NO_MURAL) ? "Frase, foto, ou os dois. Todo mundo da comunidade vê. 🐻" : "Solta a frase — todo mundo da comunidade vê. 🐻"}
+        {(podeOficial || FOTOS_NO_MURAL) ? "Frase, foto, ou os dois. Todo mundo da comunidade vê. 🐻" : "Solta a frase — todo mundo da comunidade vê. 🐻"}
       </div>
       <textarea style={{ ...inputStyle(), minHeight: 80, resize: "vertical" }} maxLength={280}
         placeholder="Escreve aqui…" value={texto} onChange={(e) => setTexto(e.target.value)} />
       {foto && <img src={foto} alt="" style={{ width: "100%", borderRadius: 10 }} />}
       <div style={{ display: "flex", gap: 8 }}>
-        {(adminSuper || adminPerms.postarFeed || FOTOS_NO_MURAL) && (
+        {(podeOficial || FOTOS_NO_MURAL) && (
           <button style={{ ...btnFantasma(), border: `1px solid ${C.line}`, borderRadius: 10, padding: "10px 14px", flex: 1 }}
             onClick={() => fileRef.current && fileRef.current.click()}>
             📷 {foto ? "Trocar foto" : "Foto"}
@@ -1203,13 +1203,13 @@ function NovoPost({ publicar, admin }) {
         <button style={{ ...btnPrimario(), flex: 2, opacity: texto.trim() || foto ? 1 : 0.5 }}
           onClick={() => {
             if (!texto.trim() && !foto) return;
-            publicar(texto.trim(), foto, (adminSuper || adminPerms.postarFeed) && comoOficial);
+            publicar(texto.trim(), foto, podeOficial && comoOficial);
             setTexto(""); setFoto(null);
           }}>
           PUBLICAR
         </button>
       </div>
-      {(adminSuper || adminPerms.postarFeed) && (
+      {podeOficial && (
         <label style={{ display: "flex", gap: 8, alignItems: "center", color: C.oak, fontSize: 12.5, cursor: "pointer" }}>
           <input type="checkbox" checked={comoOficial} onChange={(e) => setComoOficial(e.target.checked)} />
           📌 Postar como Spincycle Prudente (oficial)
@@ -1422,23 +1422,6 @@ export default function App() {
     const tp = setInterval(() => { batimentoPresenca(); }, 60000);
     return () => { clearInterval(t); clearInterval(tm); clearInterval(tp); };
   }, []);
-
-  const prateleirasSemeadas = useRef(false);
-  useEffect(() => {
-    // Cria o catálogo no banco na primeira visita da dona (prateleiras vazias + vitrine atual)
-    const semear = async () => {
-      if (!adminSuper || demo || prateleirasSemeadas.current) return;
-      if (arenaCat !== null) return; // já existe (ou ainda carregando: undefined nunca chega aqui)
-      prateleirasSemeadas.current = true;
-      const inicial = { desafios: DESAFIOS_PADRAO.map((d) => ({ ...d })) };
-      try {
-        await gravarShared(K_ARENA.catalogo, inicial);
-        setArenaCat(inicial);
-        avisar("🏟️ Prateleiras da Arena criadas no banco.");
-      } catch { prateleirasSemeadas.current = false; }
-    };
-    if (!carregando) semear();
-  }, [carregando, adminSuper, arenaCat]);
 
   const batimentoPresenca = async () => {
     const s = sessaoRef.current;
@@ -2123,6 +2106,24 @@ export default function App() {
     pagamentos: gestorClube || adminSuper || !!adminPerms.clubePagamentos,
   };
 
+  const prateleirasSemeadas = useRef(false);
+  useEffect(() => {
+    // Cria o catálogo no banco na primeira visita da dona (prateleiras vazias + vitrine atual)
+    const semear = async () => {
+      if (!adminSuper || demo || prateleirasSemeadas.current) return;
+      if (arenaCat !== null) return; // já existe (ou ainda carregando: undefined nunca chega aqui)
+      prateleirasSemeadas.current = true;
+      const inicial = { desafios: DESAFIOS_PADRAO.map((d) => ({ ...d })) };
+      try {
+        await gravarShared(K_ARENA.catalogo, inicial);
+        setArenaCat(inicial);
+        avisar("🏟️ Prateleiras da Arena criadas no banco.");
+      } catch { prateleirasSemeadas.current = false; }
+    };
+    if (!carregando) semear();
+  }, [carregando, adminSuper, arenaCat]);
+
+
   const minhaTorcidaSet = new Set(Object.keys(torcida).filter((alvo) => (torcida[alvo] || []).includes(minhaChave)));
   const nomeDaChave = (chave) => {
     if (!chave) return "";
@@ -2458,7 +2459,7 @@ export default function App() {
           </div>
         </>
       )}
-      {abaMural === "novo" && <NovoPost publicar={publicarAluno} admin={admin} />}
+      {abaMural === "novo" && <NovoPost publicar={publicarAluno} podeOficial={adminSuper || !!adminPerms.postarFeed} />}
     </>
   );
 
