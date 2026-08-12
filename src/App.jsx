@@ -2579,6 +2579,9 @@ export default function App() {
 
   // ---------- Relatório Geral (administração) ----------
   if (showRel && admin) {
+    if (!entregasData) {
+      loadEntregas().then((e) => setEntregasData(e)).catch(() => setEntregasData({}));
+    }
     const semanas = [];
     {
       let ini = new Date(DESAFIO_INICIO + "T12:00");
@@ -2708,24 +2711,54 @@ export default function App() {
               horarioCSV.push([fmtBR(h.data), h.slot.replace(":", "h"), h.grupo, profsTxt, al.nome, fmtHMS(al.reg)]);
             });
         });
-      // Missões e desafios concluídos: cada conquista que entrou na fila de prêmio, com data/hora e a pessoa
-      const PATL_REL = { horiz: "Linha Horizontal", vert: "Linha Vertical", diag: "Diagonal", corners: "4 Cantos", conv: "4 Conversões", full: "Cartela Cheia", bpm: "Giro de 175 BPM" };
+      // Missões e desafios concluídos: cada conquista que entrou na fila de prêmio, com data/hora e a pessoa.
+      // "Ganhou prêmio" usa o TETO REAL (computeAwards: 2 shakes e 1 padrão horiz/vert/diag por aluno, somando
+      // todas as missões) — não é mais "os 2 primeiros da fila", porque o 1º pode já ter batido o teto em outra missão.
+      const PATL_REL = {
+        horiz: { label: "Linha Horizontal", prize: "Camiseta Spincycle", emoji: "👕" },
+        vert: { label: "Linha Vertical", prize: "Camiseta Spincycle", emoji: "👕" },
+        diag: { label: "Diagonal", prize: "Camiseta Spincycle", emoji: "👕" },
+        corners: { label: "4 Cantos", prize: "Bolsinha Spincycle", emoji: "👜" },
+        conv: { label: "4 Conversões", prize: "Aula temática à escolha", emoji: "🎯" },
+        full: { label: "Cartela Cheia", prize: "Treinamento + 1 mês ilimitado", emoji: "🏆" },
+        bpm: { label: "Giro de 175 BPM", prize: "Aula fechada para 33 convidados", emoji: "⭐" },
+      };
+      const ENTREGAVEIS_REL = new Set(["horiz", "vert", "diag", "corners", "conv", "full"]);
       const concluidasCSV = [["Grupo", "Tipo", "Conquista", "Aluno", "Data/Hora", "Posição na fila", "Ganhou prêmio"]];
+      const premiosCSV = [["Grupo", "Prêmio", "Aluno", "Data/Hora", "Entregue?"]];
+      const prevM2 = MISSIONS;
       TRACKS.forEach((t) => {
         const d = allData[t.id]; if (!d) return;
         const w = d.winners || {};
+        MISSIONS = TRACK_MISSIONS[t.id];
+        const AW = computeAwards(d);
         (TRACK_MISSIONS[t.id] || []).forEach((m) => {
-          ((w.missionQueues || {})[m.id] || []).forEach((e, i) => {
-            concluidasCSV.push([t.short, "Missão (shake)", m.name, e.name, e.ts ? fmtDT(e.ts) : (e.date ? fmtBR(e.date) : "—"), i + 1, i < 2 ? "sim" : "não (excedeu teto)"]);
+          const q = (w.missionQueues || {})[m.id] || [];
+          const vencedorId = AW.shakes[m.id] && AW.shakes[m.id].id;
+          q.forEach((e, i) => {
+            const ganhou = !!vencedorId && e.id === vencedorId;
+            concluidasCSV.push([t.short, "Missão (shake)", m.name, e.name, e.ts ? fmtDT(e.ts) : (e.date ? fmtBR(e.date) : "—"), i + 1, ganhou ? "sim" : "não"]);
+            if (ganhou) {
+              const chave = `shake-${t.id}-${m.id}::${i + 1}::${e.name}`;
+              premiosCSV.push([t.short, `🥤 Shake — ${m.name}`, e.name, e.ts ? fmtDT(e.ts) : (e.date ? fmtBR(e.date) : "—"), (entregasData && entregasData[chave]) ? "sim" : "não"]);
+            }
           });
         });
-        Object.entries(PATL_REL).forEach(([k, label]) => {
-          ((w.placements || {})[k] || []).forEach((e, i) => {
-            concluidasCSV.push([t.short, "Padrão da cartela", label, e.name, e.ts ? fmtDT(e.ts) : (e.date ? fmtBR(e.date) : "—"), i + 1, i < 1 ? "sim" : "não (excedeu teto)"]);
+        Object.entries(PATL_REL).forEach(([k, info]) => {
+          const arr = (w.placements || {})[k] || [];
+          const vencedorId = AW.pats[k] && AW.pats[k].id;
+          arr.forEach((e, i) => {
+            const ganhou = !!vencedorId && e.id === vencedorId;
+            concluidasCSV.push([t.short, "Padrão da cartela", info.label, e.name, e.ts ? fmtDT(e.ts) : (e.date ? fmtBR(e.date) : "—"), i + 1, ganhou ? "sim" : "não"]);
+            if (ganhou && ENTREGAVEIS_REL.has(k)) {
+              const chave = `pat-${t.id}-${k}::${i + 1}::${e.name}`;
+              premiosCSV.push([t.short, `${info.emoji} ${info.prize} — ${info.label}`, e.name, e.ts ? fmtDT(e.ts) : (e.date ? fmtBR(e.date) : "—"), (entregasData && entregasData[chave]) ? "sim" : "não"]);
+            }
           });
         });
       });
-      return { pendA, pendG, aulasCSV, alunosCSV, convsCSV, profsCSV, missoesCSV, horarioCSV, concluidasCSV };
+      MISSIONS = prevM2;
+      return { pendA, pendG, aulasCSV, alunosCSV, convsCSV, profsCSV, missoesCSV, horarioCSV, concluidasCSV, premiosCSV };
     })();
     const BtnCSV = ({ rotulo, n, arq, dados }) => (
       <button
@@ -2808,9 +2841,10 @@ export default function App() {
               <BtnCSV rotulo="🎯 Missões por desafio" n={REL.missoesCSV.length - 1} arq="missoes" dados={REL.missoesCSV} />
               <BtnCSV rotulo="🕐 Aulas por horário (com professor)" n={REL.horarioCSV.length - 1} arq="aulas-por-horario" dados={REL.horarioCSV} />
               <BtnCSV rotulo="🏅 Missões e desafios concluídos" n={REL.concluidasCSV.length - 1} arq="conquistas" dados={REL.concluidasCSV} />
+              <BtnCSV rotulo="🎁 Relatório de prêmios (quem ganhou e quem já recebeu)" n={REL.premiosCSV.length - 1} arq="relatorio-premios" dados={REL.premiosCSV} />
             </div>
             <div style={{ color: C.mut, fontSize: 10, lineHeight: 1.5, marginTop: 8 }}>
-              "Missões e desafios concluídos" mostra a fila de cada prêmio na ordem de conquista. A coluna "Ganhou prêmio" aplica o teto por missão/padrão isoladamente — para o teto real por aluno (2 shakes e 1 padrão no total), confira também a página 🏆 Missões Concluídas.
+              "Missões e desafios concluídos" mostra a fila de cada prêmio na ordem de conquista, já aplicando o teto real (2 shakes e 1 padrão horiz/vert/diag por aluno, somando todas as missões). "Relatório de prêmios" traz só quem realmente ganhou, com o status de entrega — a mesma fonte da página 🏆 Missões Concluídas.
             </div>
           </div>
           {footerNote}
@@ -3504,15 +3538,22 @@ export default function App() {
         const d = premiosData[t.id]; if (!d) return;
         const M = TRACK_MISSIONS[t.id];
         const w = d.winners || {};
+        // computeAwards aplica o teto real (2 shakes e 1 padrão horiz/vert/diag por aluno, contando TODAS as missões
+        // juntas) — por isso quem "ganha de verdade" pode não ser o 1º da fila daquela missão específica.
+        const prevM = MISSIONS;
+        MISSIONS = M;
+        const AW = computeAwards(d);
+        MISSIONS = prevM;
         // Shakes por missão
         M.forEach((m) => {
           const q = (w.missionQueues || {})[m.id] || [];
           if (q.length === 0) return;
           const id = `shake-${t.id}-${m.id}`;
+          const vencedorId = AW.shakes[m.id] && AW.shakes[m.id].id;
           grupos.push({
             id, emoji: "🥤", label: `Shake — ${m.name}`, prize: "Shake do mês", grupo: t.short,
             entregavel: true,
-            lista: q.map((e, i) => ({ pos: i + 1, nome: e.name, ts: e.ts, date: e.date })),
+            lista: q.map((e, i) => ({ pos: i + 1, nome: e.name, ts: e.ts, date: e.date, ganhouPremio: !!vencedorId && e.id === vencedorId })),
           });
         });
         // Padrões — só entram no botão de entrega os prêmios físicos/tangíveis (camiseta, bolsinha, aula temática, treinamento).
@@ -3521,10 +3562,11 @@ export default function App() {
         Object.entries(PATL).forEach(([k, info]) => {
           const arr = (w.placements || {})[k] || [];
           if (arr.length === 0) return;
+          const vencedorId = AW.pats[k] && AW.pats[k].id;
           grupos.push({
             id: `pat-${t.id}-${k}`, emoji: info.emoji, label: info.label, prize: info.prize, grupo: t.short,
             entregavel: ENTREGAVEIS_PADRAO.has(k),
-            lista: arr.map((e, i) => ({ pos: i + 1, nome: e.name, ts: e.ts, date: e.date })),
+            lista: arr.map((e, i) => ({ pos: i + 1, nome: e.name, ts: e.ts, date: e.date, ganhouPremio: !!vencedorId && e.id === vencedorId })),
           });
         });
       });
@@ -3625,12 +3667,17 @@ export default function App() {
                               {e.pos === 1 ? "🥇" : e.pos === 2 ? "🥈" : e.pos === 3 ? "🥉" : e.pos}
                             </div>
                             <div className="flex-1 min-w-0">
-                              <div className="truncate" style={{ color: C.cream, fontWeight: 700, fontSize: 13 }}>{e.nome}</div>
+                              <div className="truncate" style={{ color: C.cream, fontWeight: 700, fontSize: 13 }}>
+                                {e.nome}
+                                {g.entregavel && e.ganhouPremio && (
+                                  <span style={{ color: C.ok, fontWeight: 800, fontSize: 10.5, marginLeft: 6 }}>🎁 ganhou</span>
+                                )}
+                              </div>
                               <div style={{ color: C.mut, fontSize: 11, fontFamily: "'DM Mono', monospace" }}>
                                 {e.ts ? fmtDT(e.ts) : e.date ? fmtBR(e.date) : "—"}
                               </div>
                             </div>
-                            {admin && g.entregavel && e.pos === 1 && (
+                            {admin && g.entregavel && e.ganhouPremio && (
                               <button
                                 onClick={() => toggleEntrega(chave)}
                                 className="rounded-lg px-2.5 py-1.5 shrink-0 font-bold"
