@@ -2691,15 +2691,6 @@ function TelaEmBreve({ liberar, adminsReg }) {
             onKeyDown={(e) => { if (e.key === "Enter") tentar(); }} />
           {erro && <div style={{ color: "#E08585", fontSize: 12 }}>{erro}</div>}
           <button style={btnPrimario()} onClick={tentar}>ENTRAR</button>
-          {adminLiberado && (
-            <button onClick={entrarStaff} style={{
-              ...btnFantasma(), width: "100%",
-              border: `1px solid ${C.oak}77`, borderRadius: 10, padding: "12px",
-              color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 0.5,
-            }}>
-              🔑 ENTRAR NA ADMINISTRAÇÃO (sem perfil de aluno)
-            </button>
-          )}
         </div>
       )}
     </div>
