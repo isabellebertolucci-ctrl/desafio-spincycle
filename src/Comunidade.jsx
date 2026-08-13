@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { escolherMsgRadar, categoriaInatividade } from "./RADAR_MSGS_400";
+import ursoCabecaImg from "./urso-cabeca.png";
+import ursoLogoDesafioImg from "./urso-logo-desafio.png";
 
 /* ============================================================
    COMUNIDADE SPINCYCLE — v2
@@ -1531,7 +1533,7 @@ function Reacoes({ postId, reacts, minhaChave, reagir, onVerQuem, respCount = 0,
   }, [abrirPicker]);
 
   return (
-    <div style={{ position: "absolute", bottom: 0, right: 12, display: "flex", gap: 8 }}>
+    <div style={{ position: "absolute", bottom: 0, right: 12, display: "flex", alignItems: "flex-end", gap: 8 }}>
       {onResp && (
         <span style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }}>
           {bolinha(<Ic nome="balao" size={16} stroke={1.9} />, onResp, false)}
@@ -1543,17 +1545,19 @@ function Reacoes({ postId, reacts, minhaChave, reagir, onVerQuem, respCount = 0,
       )}
 
       {resumoPorEmoji.length > 0 && (
-        <button onClick={onVerQuem} style={{
-          display: "flex", alignItems: "center", gap: 6, background: C.panelSoft,
-          border: `1px solid ${C.line}`, borderRadius: 16, padding: "6px 9px",
-          cursor: "pointer", alignSelf: "center",
-        }}>
-          {resumoPorEmoji.map(({ e, n }) => (
-            <span key={e} style={{ display: "flex", alignItems: "center", gap: 2, fontSize: 12 }}>
-              <span>{e}</span><span style={{ color: C.oak, fontWeight: 800, fontSize: 10.5 }}>{n}</span>
-            </span>
-          ))}
-        </button>
+        <span style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }}>
+          <button onClick={onVerQuem} style={{
+            height: 34, display: "flex", alignItems: "center", gap: 6, background: C.panelSoft,
+            border: `1px solid ${C.line}`, borderRadius: 16, padding: "0 9px", cursor: "pointer",
+          }}>
+            {resumoPorEmoji.map(({ e, n }) => (
+              <span key={e} style={{ display: "flex", alignItems: "center", gap: 2, fontSize: 12 }}>
+                <span>{e}</span><span style={{ color: C.oak, fontWeight: 800, fontSize: 10.5 }}>{n}</span>
+              </span>
+            ))}
+          </button>
+          <span style={{ minHeight: 12 }} />
+        </span>
       )}
 
       <span ref={pickerRef} style={{ position: "relative", display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }}>
@@ -1578,13 +1582,14 @@ function Reacoes({ postId, reacts, minhaChave, reagir, onVerQuem, respCount = 0,
           </div>
         )}
         {bolinha(minhaReacao || "🤍", () => setAbrirPicker(!abrirPicker), !!minhaReacao)}
+        <span style={{ minHeight: 12 }} />
       </span>
     </div>
   );
 }
 
 // ---------- Cartão de post (Radar e Mural) ----------
-function PostCard({ e, fotos, reacts, minhaChave, reagir, onApagar, onAutor, seloTorcida,
+function PostCard({ e, fotos, reacts, minhaChave, reagir, onApagar, onAutor, seloTorcida, equipeAutor,
   comentarios = [], onComentar, onApagarComentario, podeApagarComentario, onVerQuem, onLido, extraInfo }) {
   const ehPostDePessoa = !!e.autorNome;
   const campanha = e.tipo === "campanha";
@@ -1607,7 +1612,7 @@ function PostCard({ e, fotos, reacts, minhaChave, reagir, onApagar, onAutor, sel
             <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
               <div style={{ fontWeight: 700, fontSize: 13.5, lineHeight: 1.35 }}>
                 {ehPostDePessoa
-                  ? <span onClick={onAutor || undefined} style={{ color: oficial ? C.oak : campanha ? C.tealSoft : C.cream, ...clicavel }}>{oficial ? "📌 " : campanha ? "🏷️ " : ""}{e.autorNome}{campanha ? " · Clube" : ""}</span>
+                  ? <span onClick={onAutor || undefined} style={{ color: oficial ? C.oak : campanha ? C.tealSoft : C.cream, ...clicavel }}>{oficial ? "📌 " : campanha ? "🏷️ " : ""}{e.autorNome}{campanha ? " · Clube" : ""}{equipeAutor && <span title="Equipe Spincycle" style={{ marginLeft: 4, fontSize: 11 }}>🛡️</span>}</span>
                   : <span onClick={onAutor || undefined} style={clicavel}>{e.titulo}</span>}
                 {seloTorcida && <span title="Você torce por essa pessoa" style={{ marginLeft: 5, fontSize: 11 }}>📣</span>}
               </div>
@@ -2845,6 +2850,7 @@ export default function App() {
     reagir: (pid, em) => { regFraseLida(e.id); reagir(pid, em); },
     onLido: () => regFraseLida(e.id),
     onAutor: autorDe(e),
+    equipeAutor: !!(e.autorChave && equipe && equipe[e.autorChave]),
     seloTorcida: minhaTorcidaSet.has(chaveDoPost(e)),
     comentarios: comentarios[e.id] || [],
     onComentar: (t) => comentar(e.id, t),
@@ -3047,8 +3053,10 @@ export default function App() {
             <Painel style={{ display: "flex", gap: 14, alignItems: "center" }}>
               <div style={{
                 width: 84, height: 84, borderRadius: "50%", border: `2px solid ${C.tealSoft}66`, flexShrink: 0,
-                display: "flex", alignItems: "center", justifyContent: "center", background: C.panelSoft,
-              }}><Ic nome={fixado.icone || "urso"} size={44} stroke={1.4} style={{ color: C.oak }} /></div>
+                display: "flex", alignItems: "center", justifyContent: "center", background: C.panelSoft, overflow: "hidden",
+              }}>{(fixado.icone || "urso") === "urso"
+                ? <img src={ursoLogoDesafioImg} alt={fixado.nome} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                : <Ic nome={fixado.icone} size={44} stroke={1.4} style={{ color: C.oak }} />}</div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <div style={{ color: C.cream, fontWeight: 800, fontSize: 16, letterSpacing: 0.5 }}>{fixado.nome}</div>
@@ -4100,7 +4108,7 @@ function TelaPerfilAluno({ track, sid, allData, perfis, fotos, muralVisivel, fee
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <span style={{ fontWeight: 800, fontSize: 20, letterSpacing: 0.5, textTransform: "uppercase", lineHeight: 1.15 }}>
-              {aluno.name}
+              {aluno.name}{equipe && equipe[chave] && <span title="Equipe Spincycle" style={{ marginLeft: 6, fontSize: 15 }}>🛡️</span>}
             </span>
             {ehMeu ? (
               <button onClick={irEditar} style={{
@@ -4158,7 +4166,7 @@ function TelaPerfilAluno({ track, sid, allData, perfis, fotos, muralVisivel, fee
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
         {participa && prog ? (
           <Painel style={{ textAlign: "center", padding: "16px 8px", display: "flex", flexDirection: "column", alignItems: "center", gap: 7 }}>
-            <Ic nome="urso" size={30} stroke={1.4} style={{ color: C.oak }} />
+            <img src={ursoCabecaImg} alt="Desafio das Missões" style={{ width: 30, height: 30, borderRadius: "50%", objectFit: "cover" }} />
             <div style={{ fontWeight: 800, fontSize: 10.5, letterSpacing: 0.4, lineHeight: 1.3 }}>DESAFIO DAS MISSÕES</div>
             <div style={{ color: C.mut, fontSize: 10.5, lineHeight: 1.4 }}>
               <b style={{ color: C.oak }}>{prog.doneCount}/9</b> · {prog.p.maratona || 0} aulas
@@ -4784,9 +4792,11 @@ function TelaArena({ desafios, voltar }) {
               <div style={{
                 width: 92, minHeight: 92, borderRadius: 12, flexShrink: 0,
                 background: C.panelSoft, border: `1.5px solid ${CORES_ST[d.status]}55`,
-                display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6,
+                display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, overflow: "hidden",
               }}>
-                <Ic nome={d.icone || "urso"} size={40} stroke={1.4} style={{ color: C.oak }} />
+                {(d.icone || "urso") === "urso"
+                  ? <img src={ursoLogoDesafioImg} alt={d.nome} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  : <Ic nome={d.icone} size={40} stroke={1.4} style={{ color: C.oak }} />}
               </div>
               {/* Resumo à direita */}
               <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
