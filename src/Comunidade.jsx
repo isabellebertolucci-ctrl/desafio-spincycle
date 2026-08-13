@@ -164,30 +164,42 @@ const CATALOGO_SELOS = {
 
 // concedidos: { giro175: {chave:true}, pacotes4: {chave:true} } — selos que não vêm
 // de `prog`, concedidos manualmente pelo admin (ver alternarGiro175 / alternarPacotes4)
-function calcularCarimbos(prog, desafioId = "missoes", concedidos = {}, chaveAluno = "") {
+// aluno + targets (opcionais): quando informados para o desafio "missoes", calcula o
+// instante exato de cada conquista (via progressoIncrementos) pra ordenar os carimbos
+// com os mais recentes primeiro.
+function calcularCarimbos(prog, desafioId = "missoes", concedidos = {}, chaveAluno = "", aluno = null, targets = null) {
   const lista = [];
   if (!prog) return lista;
   const cat = CATALOGO_SELOS[desafioId];
   if (!cat) return lista;
   const S = cat.selos;
+
+  // Timestamp de cada missão individual (quando disponível), pra ordenar por "mais nova primeiro".
+  let tsPorIdx = {};
+  if (desafioId === "missoes" && aluno && targets) {
+    progressoIncrementos(aluno, targets).forEach((inc) => { tsPorIdx[inc.idx] = inc.ts; });
+  }
+  const tsDe = (idxs) => idxs.reduce((m, i) => (tsPorIdx[i] ? Math.max(m, tsPorIdx[i]) : m), 0) || 0;
+
   MISSION_BASE.forEach((m, i) => {
-    if (prog.done[i] && S[m.id]) lista.push({ id: `${desafioId}-${m.id}`, svg: S[m.id].svg, nome: S[m.id].nome, detalhe: `missão cumprida no ${cat.rotulo}` });
+    if (prog.done[i] && S[m.id]) lista.push({ id: `${desafioId}-${m.id}`, svg: S[m.id].svg, nome: S[m.id].nome, detalhe: `missão cumprida no ${cat.rotulo}`, ts: tsPorIdx[i] || 0 });
   });
   // linhas: uma vez por direção (0-2 horizontal, 3-5 vertical, 6-7 transversal/diagonal)
   const temH = prog.linesDone.some((i) => i < 3), temV = prog.linesDone.some((i) => i >= 3 && i < 6), temD = prog.linesDone.some((i) => i >= 6);
-  if (temH && S.linha_h) lista.push({ id: `${desafioId}-linha-h`, svg: S.linha_h.svg, nome: S.linha_h.nome, detalhe: `linha horizontal fechada no ${cat.rotulo}` });
-  if (temV && S.linha_v) lista.push({ id: `${desafioId}-linha-v`, svg: S.linha_v.svg, nome: S.linha_v.nome, detalhe: `linha vertical fechada no ${cat.rotulo}` });
-  if (temD && S.linha_d) lista.push({ id: `${desafioId}-linha-d`, svg: S.linha_d.svg, nome: S.linha_d.nome, detalhe: `linha transversal fechada no ${cat.rotulo}` });
+  if (temH && S.linha_h) lista.push({ id: `${desafioId}-linha-h`, svg: S.linha_h.svg, nome: S.linha_h.nome, detalhe: `linha horizontal fechada no ${cat.rotulo}`, ts: tsDe([0, 1, 2]) });
+  if (temV && S.linha_v) lista.push({ id: `${desafioId}-linha-v`, svg: S.linha_v.svg, nome: S.linha_v.nome, detalhe: `linha vertical fechada no ${cat.rotulo}`, ts: tsDe([3, 4, 5]) });
+  if (temD && S.linha_d) lista.push({ id: `${desafioId}-linha-d`, svg: S.linha_d.svg, nome: S.linha_d.nome, detalhe: `linha transversal fechada no ${cat.rotulo}`, ts: tsDe([6, 7, 8]) });
   // quatro cantos
-  if (CANTOS_IDX.every((i) => prog.done[i]) && S.cantos) lista.push({ id: `${desafioId}-cantos`, svg: S.cantos.svg, nome: S.cantos.nome, detalhe: `os quatro cantos da cartela no ${cat.rotulo}` });
-  if (prog.full && S.cartela) lista.push({ id: `${desafioId}-cheia`, svg: S.cartela.svg, nome: "Cartela Cheia", detalhe: `as 9 missões do ${cat.rotulo}` });
+  if (CANTOS_IDX.every((i) => prog.done[i]) && S.cantos) lista.push({ id: `${desafioId}-cantos`, svg: S.cantos.svg, nome: S.cantos.nome, detalhe: `os quatro cantos da cartela no ${cat.rotulo}`, ts: tsDe(CANTOS_IDX) });
+  if (prog.full && S.cartela) lista.push({ id: `${desafioId}-cheia`, svg: S.cartela.svg, nome: "Cartela Cheia", detalhe: `as 9 missões do ${cat.rotulo}`, ts: tsDe(MISSION_BASE.map((_, i) => i)) });
   // 4 Pacotes de 10 aulas: venda não tem dado no app, concedido manualmente pelo admin
-  if ((concedidos.pacotes4 || {})[chaveAluno] && S.pacotes4) lista.push({ id: `${desafioId}-pacotes4`, svg: S.pacotes4.svg, nome: S.pacotes4.nome, detalhe: "4 pacotes de 10 aulas vendidos, confirmado pela administração" });
+  // Selos concedidos manualmente não têm data exata — ficam sempre no topo (mais "novos").
+  if ((concedidos.pacotes4 || {})[chaveAluno] && S.pacotes4) lista.push({ id: `${desafioId}-pacotes4`, svg: S.pacotes4.svg, nome: S.pacotes4.nome, detalhe: "4 pacotes de 10 aulas vendidos, confirmado pela administração", ts: Infinity });
   // Missão Relâmpago: easter egg pra quem ganhou — concedido manualmente (sem dado de vencedor no app ainda)
-  if ((concedidos.relampago || {})[chaveAluno] && S.relampago) lista.push({ id: `${desafioId}-relampago`, svg: S.relampago.svg, nome: S.relampago.nome, detalhe: "venceu uma Missão Relâmpago — o ovo de páscoa da temporada 🥚" });
+  if ((concedidos.relampago || {})[chaveAluno] && S.relampago) lista.push({ id: `${desafioId}-relampago`, svg: S.relampago.svg, nome: S.relampago.nome, detalhe: "venceu uma Missão Relâmpago — o ovo de páscoa da temporada 🥚", ts: Infinity });
   // Giro 175: concedido manualmente (cartela cheia + 8 amigos no Ilimitados + 4 pacotes de 10 vendidos)
-  if ((concedidos.giro175 || {})[chaveAluno] && S.giro175) lista.push({ id: `${desafioId}-giro175`, svg: S.giro175.svg, nome: "Giro 175", detalhe: "cartela cheia, 8 amigos e 4 pacotes de 10 aulas — o combo raiz" });
-  return lista;
+  if ((concedidos.giro175 || {})[chaveAluno] && S.giro175) lista.push({ id: `${desafioId}-giro175`, svg: S.giro175.svg, nome: "Giro 175", detalhe: "cartela cheia, 8 amigos e 4 pacotes de 10 aulas — o combo raiz", ts: Infinity });
+  return lista.sort((a, b) => (b.ts || 0) - (a.ts || 0));
 }
 
 // Um selo real (asset do Kittl), giro sutil e cor conforme o tema atual.
@@ -204,27 +216,35 @@ function SeloCarimbo({ carimbo, sid, avisar }) {
 
 function CarimbosPassaporte({ carimbos, sid, avisar }) {
   const [todos, setTodos] = useState(false);
-  if (!carimbos.length) return null;
+  const PRIMEIRA_FILEIRA = 5;
+  if (!carimbos.length) {
+    return (
+      <>
+        <div style={{
+          width: 84, height: 84, borderRadius: "50%", border: `2px dashed ${C.line}`,
+          display: "flex", alignItems: "center", justifyContent: "center", opacity: 0.55,
+        }}>
+          <Ic nome="trofeu" size={30} stroke={1.4} style={{ color: C.mut }} />
+        </div>
+        <div style={{ color: C.mut, fontSize: 10.5, marginTop: 8 }}>Suas conquistas aparecem aqui assim que você fechar a primeira missão.</div>
+      </>
+    );
+  }
   return (
     <>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "flex-start" }}>
-        {(todos ? carimbos : carimbos.slice(0, 8)).map((e) => (
+        {(todos ? carimbos : carimbos.slice(0, PRIMEIRA_FILEIRA)).map((e) => (
           <SeloCarimbo key={e.id} carimbo={e} sid={sid} avisar={avisar} />
         ))}
-        {carimbos.length > 8 && !todos && (
-          <button onClick={() => setTodos(true)} style={{
-            background: "transparent", border: "none", cursor: "pointer", alignSelf: "center",
-            color: C.tealSoft, fontWeight: 800, fontSize: 12.5, padding: "0 4px",
-          }}>+{carimbos.length - 8} ›</button>
-        )}
-        {todos && carimbos.length > 8 && (
-          <button onClick={() => setTodos(false)} style={{
-            background: "transparent", border: "none", cursor: "pointer", alignSelf: "center",
-            color: C.mut, fontWeight: 700, fontSize: 12, padding: "0 4px",
-          }}>‹ menos</button>
+        {carimbos.length > PRIMEIRA_FILEIRA && (
+          <button onClick={() => setTodos(!todos)} title={todos ? "Ver menos" : "Ver todos os carimbos"} style={{
+            width: 34, height: 34, borderRadius: "50%", padding: 0, alignSelf: "center", flexShrink: 0,
+            background: C.panelSoft, border: `1px solid ${C.line}`, cursor: "pointer",
+            display: "flex", alignItems: "center", justifyContent: "center", color: C.oak, fontSize: 15,
+          }}>{todos ? "︿" : "﹀"}</button>
         )}
       </div>
-      <div style={{ color: C.mut, fontSize: 10.5, marginTop: 8 }}>Toque num carimbo pra ver a conquista.</div>
+      <div style={{ color: C.mut, fontSize: 10.5, marginTop: 8 }}>Toque num carimbo pra ver a conquista · mais recentes primeiro.</div>
     </>
   );
 }
@@ -360,7 +380,17 @@ const K = {
   giro175: `spincycle-comunidade-v1-${UNIDADE}-giro175`,
   pacotes4: `spincycle-comunidade-v1-${UNIDADE}-pacotes4`,
   relampago: `spincycle-comunidade-v1-${UNIDADE}-relampago`,
+  indicacoes: `spincycle-comunidade-v1-${UNIDADE}-indicacoes`,
 };
+
+// Regras do programa "Indicar um Amigo" — ticket dourado a cada indicação confirmada.
+const METAS_INDICACAO = [
+  { qtd: 5, premio: "1 camiseta" },
+  { qtd: 10, premio: "bolsinha Spin" },
+  { qtd: 15, premio: "boné + camiseta" },
+  { qtd: 30, premio: "kit completo (mochila, toalha e garrafa térmica)" },
+];
+const TOTAL_TICKETS_INDICACAO = 30;
 
 // ⚡ Instantes: mensagens curtinhas que somem sozinhas (estilo Notas do Instagram)
 const INSTANTE_HORAS = 24; // mude para 48 se quiser mais fôlego
@@ -1464,6 +1494,8 @@ const btnFantasma = () => ({
 // ---------- Reações: balão de respostas + emojis, sobrepostos à borda do card ----------
 function Reacoes({ postId, reacts, minhaChave, reagir, onVerQuem, respCount = 0, onResp }) {
   const doPost = reacts[postId] || {};
+  const [abrirPicker, setAbrirPicker] = useState(false);
+  const pickerRef = useRef(null);
   const bolinha = (conteudo, onClick, ativo) => (
     <button onClick={onClick} style={{
       width: 34, height: 34, borderRadius: "50%", padding: 0,
@@ -1475,6 +1507,21 @@ function Reacoes({ postId, reacts, minhaChave, reagir, onVerQuem, respCount = 0,
       color: C.cream,
     }}>{conteudo}</button>
   );
+
+  const minhaReacao = minhaChave ? REACTS.find((e) => (doPost[e] || []).includes(minhaChave)) : null;
+  const totalReacoes = REACTS.reduce((soma, e) => soma + (doPost[e] || []).length, 0);
+
+  useEffect(() => {
+    if (!abrirPicker) return;
+    const aoClicarFora = (ev) => { if (pickerRef.current && !pickerRef.current.contains(ev.target)) setAbrirPicker(false); };
+    document.addEventListener("mousedown", aoClicarFora);
+    document.addEventListener("touchstart", aoClicarFora);
+    return () => {
+      document.removeEventListener("mousedown", aoClicarFora);
+      document.removeEventListener("touchstart", aoClicarFora);
+    };
+  }, [abrirPicker]);
+
   return (
     <div style={{ position: "absolute", bottom: 0, right: 12, display: "flex", gap: 8 }}>
       {onResp && (
@@ -1486,21 +1533,36 @@ function Reacoes({ postId, reacts, minhaChave, reagir, onVerQuem, respCount = 0,
           }}>{respCount || "0"}</span>
         </span>
       )}
-      {REACTS.map((e) => {
-        const quem = doPost[e] || [];
-        const eu = minhaChave && quem.includes(minhaChave);
-        return (
-          <span key={e} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }}>
-            {bolinha(e, () => reagir(postId, e), eu)}
-            <button onClick={quem.length ? onVerQuem : undefined} style={{
-              background: "transparent", border: "none", padding: 0,
-              fontSize: 10, fontWeight: 700, minHeight: 12, lineHeight: 1.2,
-              color: quem.length ? C.oak : "transparent",
-              cursor: quem.length ? "pointer" : "default",
-            }}>{quem.length || "0"}</button>
-          </span>
-        );
-      })}
+
+      <span ref={pickerRef} style={{ position: "relative", display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }}>
+        {abrirPicker && (
+          <div style={{
+            position: "absolute", bottom: 42, right: -6, display: "flex", gap: 6, padding: "6px 8px",
+            background: C.panel, border: `1px solid ${C.line}`, borderRadius: 20,
+            boxShadow: "0 4px 16px rgba(0,0,0,.45)", zIndex: 5,
+          }}>
+            {REACTS.map((e) => (
+              <button key={e} onClick={async () => {
+                if (minhaReacao && minhaReacao !== e) await reagir(postId, minhaReacao);
+                await reagir(postId, e);
+                setAbrirPicker(false);
+              }} style={{
+                width: 30, height: 30, borderRadius: "50%", padding: 0, fontSize: 16, lineHeight: 1,
+                background: e === minhaReacao ? C.teal : "transparent",
+                border: "none", cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center",
+              }}>{e}</button>
+            ))}
+          </div>
+        )}
+        {bolinha(minhaReacao || "🤍", () => setAbrirPicker(!abrirPicker), !!minhaReacao)}
+        <button onClick={totalReacoes ? onVerQuem : undefined} style={{
+          background: "transparent", border: "none", padding: 0,
+          fontSize: 10, fontWeight: 700, minHeight: 12, lineHeight: 1.2,
+          color: totalReacoes ? C.oak : "transparent",
+          cursor: totalReacoes ? "pointer" : "default",
+        }}>{totalReacoes || "0"}</button>
+      </span>
     </div>
   );
 }
@@ -1739,6 +1801,7 @@ function NovoPost({ publicar, admin }) {
 // ---------- App ----------
 export default function App() {
   const [tela, setTela] = useState("inicio");
+  const [menuAberto, setMenuAberto] = useState(false);
   const [perfilVisto, setPerfilVisto] = useState(null); // { track, sid } da página de aluno aberta // inicio | mural | ranking | agenda | clube | cadastroClube | busca | global | perfil | fotosAlunos
   const [abaMural, setAbaMural] = useState("radar"); // radar | mural | novo
   const [filtroRadar, setFiltroRadar] = useState("todos"); // todos | torcida
@@ -1769,6 +1832,7 @@ export default function App() {
   const [clubeFoco, setClubeFoco] = useState(null);      // parceiro para abrir já expandido no Clube
   const [instantes, setInstantes] = useState([]);      // [{id, ts, texto, autorNome, autorChave}]
   const [recados, setRecados] = useState({});          // { chaveAlvo: [{id, ts, texto, autorNome, autorChave}] }
+  const [indicacoes, setIndicacoes] = useState({});     // { chaveIndicador: [{id, ts, nome, telefone}] }
   const [giro175, setGiro175] = useState({});          // { chaveAluno: { ts, por } } — concedido manualmente pelo admin
   const [pacotes4, setPacotes4] = useState({});         // { chaveAluno: { ts, por } } — venda de 4 pacotes de 10, idem
   const [relampago, setRelampago] = useState({});       // { chaveAluno: { ts, por } } — ganhou Missão Relâmpago, idem
@@ -1795,7 +1859,7 @@ export default function App() {
 
   const carregarLeves = async () => {
     if (demoRef.current) return;
-    const [il, pc, ps, gg, ma, rc, pf, ag, cb, cf, bs, mt, adr, prs, tc, cm, it, rd, g175, p4, relp] = await Promise.all([
+    const [il, pc, ps, gg, ma, rc, pf, ag, cb, cf, bs, mt, adr, prs, tc, cm, it, rd, g175, p4, relp, ind] = await Promise.all([
       lerShared(KEY_DESAFIO("ilimitado"), { students: [] }),
       lerShared(KEY_DESAFIO("pacote"), { students: [] }),
       lerShared(KEY_DESAFIO("passe"), { students: [] }),
@@ -1817,6 +1881,7 @@ export default function App() {
       lerShared(K.giro175, {}),
       lerShared(K.pacotes4, {}),
       lerShared(K.relampago, {}),
+      lerShared(K.indicacoes, {}),
     ]);
     if (il !== undefined || pc !== undefined || ps !== undefined) {
       setAllData({
@@ -1840,6 +1905,7 @@ export default function App() {
     if (cm !== undefined) setComentarios(cm || {});
     if (it !== undefined) setInstantes(Array.isArray(it) ? it : []);
     if (rd !== undefined) setRecados(rd || {});
+    if (ind !== undefined) setIndicacoes(ind || {});
     if (g175 !== undefined) setGiro175(g175 || {});
     if (p4 !== undefined) setPacotes4(p4 || {});
     if (relp !== undefined) setRelampago(relp || {});
@@ -2507,6 +2573,27 @@ export default function App() {
     try { await gravarShared(K.recados, novo); setRecados(novo); } catch { avisar("⚠️ Falha ao remover."); }
   };
 
+  // 🎁 Indicar um Amigo: cada indicação confirmada vira 1 ticket na cartela do indicador
+  const indicarAmigo = async (nome, telefone) => {
+    if (!minhaChave) return;
+    const rec = { id: `ind-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, ts: Date.now(), nome: nome.trim(), telefone: telefone.trim() };
+    const aplicar = (base) => {
+      const novo = JSON.parse(JSON.stringify(base || {}));
+      if (!novo[minhaChave]) novo[minhaChave] = [];
+      novo[minhaChave].push(rec);
+      return novo;
+    };
+    if (demo) { setIndicacoes(aplicar(indicacoes)); avisar("🎁 Indicação registrada (demonstração)."); return; }
+    const base = await lerShared(K.indicacoes, {});
+    if (base === undefined) { avisar("⚠️ Sem conexão — a indicação NÃO foi salva."); return; }
+    const novo = aplicar(base);
+    try {
+      await gravarShared(K.indicacoes, novo);
+      setIndicacoes(novo);
+      avisar("🎁 Indicação registrada! Assim que seu amigo confirmar a primeira aula, o ticket é seu.");
+    } catch { avisar("⚠️ Falha ao registrar a indicação."); }
+  };
+
   // 🏅 Giro 175: selo concedido manualmente pelo admin — cartela cheia + 8 amigos
   // (Ilimitados) + 4 pacotes de 10 aulas vendidos. Venda não tem dado no app,
   // então quem confirma é a administração, com um toque, igual ao ◻️ Entregue.
@@ -2732,6 +2819,23 @@ export default function App() {
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         button { font-family: inherit; }
       `}</style>
+      {!semNav && sessao && (
+        <div style={{
+          position: "sticky", top: 0, zIndex: 40, display: "flex", justifyContent: "flex-end",
+          padding: "calc(env(safe-area-inset-top) + 12px) 16px 0", background: C.bg,
+        }}>
+          <button onClick={() => setMenuAberto(true)} aria-label="Abrir menu" style={{
+            width: 38, height: 38, borderRadius: 10, background: C.panelSoft, border: `1px solid ${C.line}`,
+            cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+          }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "center" }}>
+              <span style={{ width: 18, height: 2, borderRadius: 2, background: C.cream }} />
+              <span style={{ width: 18, height: 2, borderRadius: 2, background: C.cream }} />
+              <span style={{ width: 18, height: 2, borderRadius: 2, background: C.cream }} />
+            </div>
+          </button>
+        </div>
+      )}
       <div ref={contRef} onTouchStart={aoTocar} onTouchMove={aoArrastar} onTouchEnd={aoSoltar}
         style={{ maxWidth: 520, margin: "0 auto", padding: "16px 16px 110px" }}>
         {conteudo}
@@ -2822,7 +2926,7 @@ export default function App() {
         </Painel>
       </div>
 
-      {(adminSuper || adminPerms.verUso || adminPerms.painelCompleto) && (
+      {(adminSuper || adminPerms.verUso || adminPerms.painelCompleto || (sessao && sessao.staff)) && (
         <Painel onClick={() => setTela("painel")} style={{
           marginTop: 18, display: "flex", alignItems: "center", gap: 12,
           border: `1px solid ${C.oak}66`,
@@ -2875,8 +2979,8 @@ export default function App() {
         const trilhaMeu = TRACKS.find((t) => t.id === sessao.track);
         const alunoMeu = (((allData[sessao.track] || {}).students) || []).find((s) => s.id === sessao.sid);
         const progMeu = alunoMeu && trilhaMeu ? computeProgress(alunoMeu, trilhaMeu.targets) : null;
-        const meusCarimbos = calcularCarimbos(progMeu, "missoes", { giro175, pacotes4, relampago }, `${sessao.track}:${sessao.sid}`);
-        if (!meusCarimbos.length) return null;
+        if (!alunoMeu) return null;
+        const meusCarimbos = calcularCarimbos(progMeu, "missoes", { giro175, pacotes4, relampago }, `${sessao.track}:${sessao.sid}`, alunoMeu, trilhaMeu ? trilhaMeu.targets : null);
         return (
           <div style={{ marginTop: 14 }}>
             <div style={{ color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 1, marginBottom: 8 }}>🎖️ MEUS CARIMBOS</div>
@@ -3126,18 +3230,62 @@ export default function App() {
     <TelaGestaoAdmins adminsReg={adminsReg} salvarAdmins={salvarAdmins} allData={allData} fotos={fotos} voltar={() => setTela("painel")} />
   ) : null;
 
+  const telaIndicarAmigo = (
+    <TelaIndicarAmigo minhasIndicacoes={indicacoes[minhaChave] || []} indicarAmigo={indicarAmigo} avisar={avisar} voltar={() => setTela("inicio")} />
+  );
+
   const conteudo = {
     inicio: telaInicio, mural: telaMural, ranking: telaRanking, agenda: telaAgenda,
     clube: telaClube, cadastroClube: telaCadastroClube, busca: telaBusca, arena: telaArena,
     favoritos: telaFavoritos, painel: telaPainel, gestaoAdmins: telaGestaoAdmins,
     alunoPerfil: telaAlunoPerfil, instantes: telaInstantes,
     global: telaGlobal, perfil: telaPerfil, fotosAlunos: telaFotos,
+    indicarAmigo: telaIndicarAmigo,
   }[tela] || telaInicio;
 
   return (
     <>
       <div dangerouslySetInnerHTML={{ __html: SELO_DEFS_HTML }} />
       {shell(conteudo)}
+      {menuAberto && (
+        <div onClick={() => setMenuAberto(false)} style={{
+          position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", zIndex: 200, display: "flex", justifyContent: "flex-end",
+        }}>
+          <div onClick={(ev) => ev.stopPropagation()} style={{
+            width: "78%", maxWidth: 320, height: "100%", background: C.panel, borderLeft: `1px solid ${C.line}`,
+            padding: "calc(env(safe-area-inset-top) + 20px) 18px 20px", display: "flex", flexDirection: "column",
+            gap: 2, overflowY: "auto",
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <span style={{ fontWeight: 800, fontSize: 14, color: C.oak, letterSpacing: 1 }}>MENU</span>
+              <button onClick={() => setMenuAberto(false)} style={{ background: "transparent", border: "none", color: C.mut, fontSize: 20, cursor: "pointer" }}>✕</button>
+            </div>
+            {[
+              { icone: "👤", rot: "Meu perfil", onClick: () => { if (sessao && sessao.staff) setTela("painel"); else if (sessao) abrirPerfilAluno(sessao.track, sessao.sid); } },
+              { icone: "📊", rot: "Meu ranking", onClick: () => setTela("ranking") },
+              { icone: "🏆", rot: "Meus desafios", onClick: () => setTela("arena") },
+              { icone: "🎖️", rot: "Minhas conquistas", onClick: () => { if (sessao && sessao.staff) setTela("painel"); else if (sessao) abrirPerfilAluno(sessao.track, sessao.sid); } },
+              { icone: "🎟️", rot: "Meu clube favorito", onClick: () => setTela("favoritos") },
+              { icone: "🎁", rot: "Indicar um amigo", onClick: () => setTela("indicarAmigo") },
+            ].map((item) => (
+              <button key={item.rot} onClick={() => { setMenuAberto(false); item.onClick(); }} style={{
+                display: "flex", alignItems: "center", gap: 12, background: "transparent", border: "none",
+                padding: "13px 4px", cursor: "pointer", color: C.cream, fontSize: 14, fontWeight: 700,
+                borderBottom: `1px solid ${C.line}`, textAlign: "left", fontFamily: "inherit",
+              }}>
+                <span style={{ fontSize: 17 }}>{item.icone}</span>{item.rot}
+              </button>
+            ))}
+            <button onClick={() => { setMenuAberto(false); sair(); }} style={{
+              display: "flex", alignItems: "center", gap: 12, background: "transparent", border: "none",
+              padding: "13px 4px", cursor: "pointer", color: "#E08585", fontSize: 14, fontWeight: 700,
+              marginTop: 8, fontFamily: "inherit", textAlign: "left",
+            }}>
+              <span style={{ fontSize: 17 }}>🚪</span>Sair da conta
+            </button>
+          </div>
+        </div>
+      )}
       {verReacoes && (
         <div onClick={() => setVerReacoes(null)} style={{
           position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", zIndex: 180,
@@ -3845,7 +3993,7 @@ function TelaPerfilAluno({ track, sid, allData, perfis, fotos, muralVisivel, fee
   const temGiro175 = !!(giro175 && giro175[chave]);
   const temPacotes4 = !!(pacotes4 && pacotes4[chave]);
   const temRelampago = !!(relampago && relampago[chave]);
-  const carimbos = calcularCarimbos(prog, "missoes", { giro175: giro175 || {}, pacotes4: pacotes4 || {}, relampago: relampago || {} }, chave);
+  const carimbos = calcularCarimbos(prog, "missoes", { giro175: giro175 || {}, pacotes4: pacotes4 || {}, relampago: relampago || {} }, chave, aluno, trilha ? trilha.targets : null);
   // Últimas: o que falaram dele (Radar) + o que ele escreveu, em ordem
   const meusPosts = muralVisivel.filter((p) => p.autorChave === chave);
   const sobreEle = feedRadar.filter((e) => e.sid === sid && e.track === track);
@@ -3930,7 +4078,7 @@ function TelaPerfilAluno({ track, sid, allData, perfis, fotos, muralVisivel, fee
       </div>
 
       {/* Carimbos estilo passaporte */}
-      {carimbos.length > 0 && (
+      {participa && (
         <>
           <div style={{ color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 1, margin: "18px 0 8px" }}>🎖️ CARIMBOS</div>
           <CarimbosPassaporte carimbos={carimbos} sid={sid} avisar={avisar} />
@@ -4806,6 +4954,102 @@ function TelaAgenda({ agenda, lembretes, admin, salvarLembrete, addEventoMarca, 
 
 // ---------- Perfil ----------
 const TAM_CAMISETA = ["PP", "P", "M", "G", "GG"];
+// ---------- Indicar um Amigo: ticket dourado a cada meta batida ----------
+function TicketIndicacao({ n, alcancado, premio }) {
+  const cor = alcancado ? "#D4AF37" : C.line;
+  return (
+    <div title={premio ? (alcancado ? `🎉 ${premio}` : `Prêmio em ${n} indicações: ${premio}`) : `Ticket ${n}`} style={{
+      aspectRatio: "1.4", border: `2px dashed ${cor}`, borderRadius: 10,
+      display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center",
+      padding: 4, background: alcancado && premio ? "rgba(212,175,55,.1)" : "transparent",
+      opacity: alcancado ? 1 : 0.5,
+    }}>
+      {premio ? (
+        <span style={{ fontSize: 8.5, fontWeight: 800, color: alcancado ? "#D4AF37" : C.mut, lineHeight: 1.15 }}>
+          {alcancado ? premio : `🎟️ ${n}`}
+        </span>
+      ) : (
+        <span style={{ fontSize: 11, fontWeight: 800, color: alcancado ? C.oak : C.mut }}>{alcancado ? "✓" : n}</span>
+      )}
+    </div>
+  );
+}
+
+function TelaIndicarAmigo({ minhasIndicacoes = [], indicarAmigo, avisar, voltar }) {
+  const [nome, setNome] = useState("");
+  const [telefone, setTelefone] = useState("");
+  const qtd = minhasIndicacoes.length;
+  const proximaMeta = METAS_INDICACAO.find((m) => qtd < m.qtd);
+
+  const enviar = () => {
+    const n = nome.trim().replace(/\s+/g, " ");
+    if (n.split(" ").filter((w) => w.length >= 2).length < 2) { avisar("Digite nome e sobrenome do seu amigo."); return; }
+    const tel = telefone.replace(/\D/g, "");
+    if (tel.length < 10 || tel.length > 11) { avisar("WhatsApp com DDD, só números (ex.: 18999342345)."); return; }
+    indicarAmigo(n, tel);
+    setNome(""); setTelefone("");
+  };
+
+  return (
+    <>
+      <CabecalhoTela titulo="INDICAR UM AMIGO" sub="Você indica, seu amigo ganha, você ganha." voltar={voltar} />
+
+      <Painel style={{ marginBottom: 18 }}>
+        <div style={{ color: C.cream, fontSize: 13, lineHeight: 1.5 }}>
+          Aqui você indica um amigo, ele ganha e você ganha. Ele ganha{" "}
+          <b style={{ color: C.oak }}>2 aulas bônus a cada 10 aulas compradas</b>, e você acumula tickets rumo a esses prêmios:
+        </div>
+        <div style={{ marginTop: 10, display: "grid", gap: 4 }}>
+          {METAS_INDICACAO.map((m) => (
+            <div key={m.qtd} style={{ fontSize: 12, color: C.mut }}>
+              <b style={{ color: C.oak }}>{m.qtd} indicações</b> — {m.premio}
+            </div>
+          ))}
+        </div>
+      </Painel>
+
+      <div style={{ color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 1, marginBottom: 8 }}>
+        🎟️ SEUS TICKETS ({qtd}/{TOTAL_TICKETS_INDICACAO})
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8, marginBottom: 8 }}>
+        {Array.from({ length: TOTAL_TICKETS_INDICACAO }, (_, i) => i + 1).map((n) => {
+          const meta = METAS_INDICACAO.find((m) => m.qtd === n);
+          return <TicketIndicacao key={n} n={n} alcancado={qtd >= n} premio={meta ? meta.premio : null} />;
+        })}
+      </div>
+      {proximaMeta ? (
+        <div style={{ color: C.mut, fontSize: 11.5, marginBottom: 22 }}>
+          Faltam <b style={{ color: C.oak }}>{proximaMeta.qtd - qtd}</b> indicaç{proximaMeta.qtd - qtd === 1 ? "ão" : "ões"} pra {proximaMeta.premio}.
+        </div>
+      ) : (
+        <div style={{ color: C.ok, fontSize: 11.5, marginBottom: 22, fontWeight: 700 }}>🏆 Você já desbloqueou todos os prêmios!</div>
+      )}
+
+      <div style={{ color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 1, marginBottom: 8 }}>➕ NOVA INDICAÇÃO</div>
+      <Painel style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <input style={inputStyle()} placeholder="Nome do amigo" value={nome} onChange={(e) => setNome(e.target.value)} />
+        <input style={inputStyle()} type="tel" inputMode="numeric" placeholder="WhatsApp do amigo — com DDD"
+          value={telefone} onChange={(e) => setTelefone(e.target.value.replace(/\D/g, "").slice(0, 11))} />
+        <button style={btnPrimario()} onClick={enviar}>Indicar amigo</button>
+      </Painel>
+
+      {minhasIndicacoes.length > 0 && (
+        <>
+          <div style={{ color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 1, margin: "20px 0 8px" }}>📋 SUAS INDICAÇÕES</div>
+          <div style={{ display: "grid", gap: 6 }}>
+            {[...minhasIndicacoes].sort((a, b) => b.ts - a.ts).map((r) => (
+              <Painel key={r.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px" }}>
+                <span style={{ fontSize: 13, fontWeight: 700 }}>{r.nome}</span>
+                <span style={{ fontSize: 11, color: C.mut }}>{agoLabel(r.ts)}</span>
+              </Painel>
+            ))}
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
 function TelaPerfil({ sessao, aluno, perfil, foto, salvarPerfil, sair, admin, tema, mudarTema, irFotos, voltar }) {
   const [bio, setBio] = useState(perfil.bio || "");
   const [editandoBio, setEditandoBio] = useState(false);
