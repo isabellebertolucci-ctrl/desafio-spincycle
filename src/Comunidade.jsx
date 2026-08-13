@@ -119,7 +119,7 @@ const PALETAS = {
 const C = { ...PALETAS.escuro };
 function aplicarTema(t) { Object.assign(C, PALETAS[t] || PALETAS.escuro); }
 
-const REACTS = ["❤️", "🔥", "😳", "😂"];
+const REACTS = ["❤️", "🔥", "💪", "😳", "😂"];
 const FRASES_PRONTAS = [
   "Hoje vou só no balancinho.",
   "Quem tiver do meu lado segura na minha mão e me puxa.",
@@ -216,8 +216,8 @@ function SeloCarimbo({ carimbo, sid, avisar }) {
   const cor = C.cream; // preto no tema claro, quase-branco no tema escuro — acompanha o app
   return (
     <button title={carimbo.nome} onClick={() => avisar && avisar(`${carimbo.nome} — ${carimbo.detalhe}`)} style={{
-      width: 84, height: 84, background: "transparent", border: "none", cursor: "pointer", padding: 0,
-      transform: `rotate(${rot}deg)`, flexShrink: 0,
+      width: "100%", aspectRatio: "1", maxWidth: 84, background: "transparent", border: "none", cursor: "pointer", padding: 0,
+      transform: `rotate(${rot}deg)`,
     }} dangerouslySetInnerHTML={{ __html: seloSvgHtml(carimbo.svg, cor) }} />
   );
 }
@@ -240,18 +240,20 @@ function CarimbosPassaporte({ carimbos, sid, avisar }) {
   }
   return (
     <>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "flex-start" }}>
+      <div style={{ display: "grid", gridTemplateColumns: `repeat(${PRIMEIRA_FILEIRA}, 1fr)`, gap: 8 }}>
         {(todos ? carimbos : carimbos.slice(0, PRIMEIRA_FILEIRA)).map((e) => (
           <SeloCarimbo key={e.id} carimbo={e} sid={sid} avisar={avisar} />
         ))}
-        {carimbos.length > PRIMEIRA_FILEIRA && (
+      </div>
+      {carimbos.length > PRIMEIRA_FILEIRA && (
+        <div style={{ display: "flex", justifyContent: "center", marginTop: 8 }}>
           <button onClick={() => setTodos(!todos)} title={todos ? "Ver menos" : "Ver todos os carimbos"} style={{
-            width: 34, height: 34, borderRadius: "50%", padding: 0, alignSelf: "center", flexShrink: 0,
+            width: 34, height: 34, borderRadius: "50%", padding: 0,
             background: C.panelSoft, border: `1px solid ${C.line}`, cursor: "pointer",
             display: "flex", alignItems: "center", justifyContent: "center", color: C.oak, fontSize: 15,
           }}>{todos ? "︿" : "﹀"}</button>
-        )}
-      </div>
+        </div>
+      )}
       <div style={{ color: C.mut, fontSize: 10.5, marginTop: 8 }}>Toque num carimbo pra ver a conquista · mais recentes primeiro.</div>
     </>
   );
@@ -1515,6 +1517,7 @@ function Reacoes({ postId, reacts, minhaChave, reagir, onVerQuem, respCount = 0,
 
   const minhaReacao = minhaChave ? REACTS.find((e) => (doPost[e] || []).includes(minhaChave)) : null;
   const totalReacoes = REACTS.reduce((soma, e) => soma + (doPost[e] || []).length, 0);
+  const resumoPorEmoji = REACTS.map((e) => ({ e, n: (doPost[e] || []).length })).filter((x) => x.n > 0);
 
   useEffect(() => {
     if (!abrirPicker) return;
@@ -1539,6 +1542,20 @@ function Reacoes({ postId, reacts, minhaChave, reagir, onVerQuem, respCount = 0,
         </span>
       )}
 
+      {resumoPorEmoji.length > 0 && (
+        <button onClick={onVerQuem} style={{
+          display: "flex", alignItems: "center", gap: 6, background: C.panelSoft,
+          border: `1px solid ${C.line}`, borderRadius: 16, padding: "6px 9px",
+          cursor: "pointer", alignSelf: "center",
+        }}>
+          {resumoPorEmoji.map(({ e, n }) => (
+            <span key={e} style={{ display: "flex", alignItems: "center", gap: 2, fontSize: 12 }}>
+              <span>{e}</span><span style={{ color: C.oak, fontWeight: 800, fontSize: 10.5 }}>{n}</span>
+            </span>
+          ))}
+        </button>
+      )}
+
       <span ref={pickerRef} style={{ position: "relative", display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }}>
         {abrirPicker && (
           <div style={{
@@ -1561,12 +1578,6 @@ function Reacoes({ postId, reacts, minhaChave, reagir, onVerQuem, respCount = 0,
           </div>
         )}
         {bolinha(minhaReacao || "🤍", () => setAbrirPicker(!abrirPicker), !!minhaReacao)}
-        <button onClick={totalReacoes ? onVerQuem : undefined} style={{
-          background: "transparent", border: "none", padding: 0,
-          fontSize: 10, fontWeight: 700, minHeight: 12, lineHeight: 1.2,
-          color: totalReacoes ? C.oak : "transparent",
-          cursor: totalReacoes ? "pointer" : "default",
-        }}>{totalReacoes || "0"}</button>
       </span>
     </div>
   );
@@ -1758,7 +1769,7 @@ function TelaLogin({ allData, carregando, onEntrar, entrarDemo, onParceiro, admi
 }
 
 // ---------- Novo Post (aba do Mural) ----------
-function NovoPost({ publicar, admin }) {
+function NovoPost({ publicar, admin, podePostarOficial }) {
   const [texto, setTexto] = useState("");
   const [foto, setFoto] = useState(null);
   const [comoOficial, setComoOficial] = useState(false);
@@ -1766,13 +1777,13 @@ function NovoPost({ publicar, admin }) {
   return (
     <div style={{ display: "grid", gap: 10 }}>
       <div style={{ color: C.mut, fontSize: 12.5, lineHeight: 1.5 }}>
-        {(adminSuper || adminPerms.postarFeed || FOTOS_NO_MURAL) ? "Frase, foto, ou os dois. Todo mundo da comunidade vê. 🐻" : "Solta a frase — todo mundo da comunidade vê. 🐻"}
+        {(podePostarOficial || FOTOS_NO_MURAL) ? "Frase, foto, ou os dois. Todo mundo da comunidade vê. 🐻" : "Solta a frase — todo mundo da comunidade vê. 🐻"}
       </div>
       <textarea style={{ ...inputStyle(), minHeight: 80, resize: "vertical" }} maxLength={280}
         placeholder="Escreve aqui…" value={texto} onChange={(e) => setTexto(e.target.value)} />
       {foto && <img src={foto} alt="" style={{ width: "100%", borderRadius: 10 }} />}
       <div style={{ display: "flex", gap: 8 }}>
-        {(adminSuper || adminPerms.postarFeed || FOTOS_NO_MURAL) && (
+        {(podePostarOficial || FOTOS_NO_MURAL) && (
           <button style={{ ...btnFantasma(), border: `1px solid ${C.line}`, borderRadius: 10, padding: "10px 14px", flex: 1 }}
             onClick={() => fileRef.current && fileRef.current.click()}>
             📷 {foto ? "Trocar foto" : "Foto"}
@@ -1781,13 +1792,13 @@ function NovoPost({ publicar, admin }) {
         <button style={{ ...btnPrimario(), flex: 2, opacity: texto.trim() || foto ? 1 : 0.5 }}
           onClick={() => {
             if (!texto.trim() && !foto) return;
-            publicar(texto.trim(), foto, (adminSuper || adminPerms.postarFeed) && comoOficial);
+            publicar(texto.trim(), foto, podePostarOficial && comoOficial);
             setTexto(""); setFoto(null);
           }}>
           PUBLICAR
         </button>
       </div>
-      {(adminSuper || adminPerms.postarFeed) && (
+      {podePostarOficial && (
         <label style={{ display: "flex", gap: 8, alignItems: "center", color: C.oak, fontSize: 12.5, cursor: "pointer" }}>
           <input type="checkbox" checked={comoOficial} onChange={(e) => setComoOficial(e.target.checked)} />
           📌 Postar como Spincycle Prudente (oficial)
@@ -3157,7 +3168,7 @@ export default function App() {
           </div>
         </>
       )}
-      {abaMural === "novo" && <NovoPost publicar={publicarAluno} admin={admin} />}
+      {abaMural === "novo" && <NovoPost publicar={publicarAluno} admin={admin} podePostarOficial={adminSuper || !!adminPerms.postarFeed} />}
     </>
   );
 
@@ -3305,7 +3316,7 @@ export default function App() {
   );
 
   const telaGestaoAdmins = adminSuper ? (
-    <TelaGestaoAdmins adminsReg={adminsReg} salvarAdmins={salvarAdmins} allData={allData} fotos={fotos} voltar={() => setTela("painel")} />
+    <TelaGestaoAdmins adminsReg={adminsReg} salvarAdmins={salvarAdmins} allData={allData} fotos={fotos} avisar={avisar} voltar={() => setTela("painel")} />
   ) : null;
 
   const telaIndicarAmigo = (
@@ -4520,13 +4531,17 @@ function TelaPainelAdm({ metricas, clube, fotos, allData, muralAlunos, reacts, c
 }
 
 // ---------- Central de cadastros e permissões (só a dona do app) ----------
-function TelaGestaoAdmins({ adminsReg, salvarAdmins, allData, fotos, voltar }) {
+function TelaGestaoAdmins({ adminsReg, salvarAdmins, allData, fotos, avisar, voltar }) {
   const vazio = { id: null, nome: "", usuario: "", pin: "", unidade: "prudente", papel: "aluno", permissoes: {} };
   const [form, setForm] = useState(vazio);
   const [confirmar, setConfirmar] = useState(null);
   const [buscaAluno, setBuscaAluno] = useState("");
   const salvar = () => {
-    if (!form.nome.trim() || !form.usuario.trim() || !form.pin.trim()) return;
+    if (!form.nome.trim() || !form.usuario.trim() || !form.pin.trim()) {
+      const faltando = [!form.nome.trim() && "nome", !form.usuario.trim() && "usuário", !form.pin.trim() && "PIN"].filter(Boolean).join(", ");
+      avisar(`⚠️ Preencha ${faltando} antes de salvar.`);
+      return;
+    }
     salvarAdmins((lista) => {
       const limpo = { ...form, usuario: form.usuario.trim().toLowerCase() };
       if (form.id) {
@@ -4634,7 +4649,7 @@ function TelaGestaoAdmins({ adminsReg, salvarAdmins, allData, fotos, voltar }) {
 
         <div style={{ display: "flex", gap: 8 }}>
           {form.id && <button style={{ ...btnFantasma(), flex: 1, color: C.mut }} onClick={() => setForm(vazio)}>Cancelar</button>}
-          <button style={{ ...btnPrimario(), flex: 2, opacity: form.nome.trim() && form.usuario.trim() && form.pin.trim() ? 1 : 0.5 }} onClick={salvar}>SALVAR</button>
+          <button style={{ ...btnPrimario(), flex: 2, opacity: form.nome.trim() && form.usuario.trim() && form.pin.trim() ? 1 : 0.7 }} onClick={salvar}>SALVAR</button>
         </div>
       </Painel>
 
@@ -5206,7 +5221,10 @@ function TelaPerfil({ sessao, aluno, perfil, foto, salvarPerfil, sair, admin, te
         </div>
         {aluno && salvarGenero && !sessao.staff && (
           <div style={{ marginTop: 4 }}>
-            <div style={{ fontSize: 13, color: C.mut, marginBottom: 6 }}>Gênero <span style={{ fontSize: 10.5 }}>(usado nas mensagens da Comunidade)</span></div>
+            <div style={{ fontSize: 13, marginBottom: 6 }}>
+              <span style={{ color: C.mut }}>Gênero: </span>{generoAtual === "M" ? "Masculino" : "Feminino"}
+              <span style={{ color: C.mut, fontSize: 10.5 }}> (usado nas mensagens da Comunidade)</span>
+            </div>
             <div style={{ display: "flex", gap: 6 }}>
               {[["F", "Feminino"], ["M", "Masculino"]].map(([v, rot]) => (
                 <button key={v} onClick={() => salvarGenero(v)} style={{
