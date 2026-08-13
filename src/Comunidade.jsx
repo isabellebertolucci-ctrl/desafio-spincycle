@@ -1726,6 +1726,14 @@ function TelaLogin({ allData, carregando, onEntrar, entrarDemo, onParceiro, admi
               🧪 Banco vazio detectado — entrar em modo demonstração
             </button>
           )}
+          {adminLiberado && entrarStaff && (
+            <button onClick={entrarStaff} style={{
+              ...btnFantasma(), textAlign: "center", color: C.oak, marginTop: 12,
+              border: `1px solid ${C.oak}66`, borderRadius: 10, padding: "10px", fontWeight: 800,
+            }}>
+              🔒 Entrar como Administração
+            </button>
+          )}
         </div>
       ) : (
         <div style={{ display: "grid", gap: 10 }}>
@@ -2821,9 +2829,15 @@ export default function App() {
       `}</style>
       {!semNav && sessao && (
         <div style={{
-          position: "sticky", top: 0, zIndex: 40, display: "flex", justifyContent: "flex-end",
+          position: "sticky", top: 0, zIndex: 40, display: "grid", gridTemplateColumns: "38px 1fr 38px",
+          alignItems: "center", gap: 8,
           padding: "calc(env(safe-area-inset-top) + 12px) 16px 0", background: C.bg,
         }}>
+          <span />
+          <span style={{
+            textAlign: "center", color: C.oak, fontWeight: 800, fontSize: 12, letterSpacing: 0.6,
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+          }}>Você está na Arena Spin</span>
           <button onClick={() => setMenuAberto(true)} aria-label="Abrir menu" style={{
             width: 38, height: 38, borderRadius: 10, background: C.panelSoft, border: `1px solid ${C.line}`,
             cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
