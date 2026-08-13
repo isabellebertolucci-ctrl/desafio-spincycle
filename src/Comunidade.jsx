@@ -30,6 +30,14 @@ const ADMINS = {
   isabelle: "273646!#",
   monique: "937264!#",
 };
+// Nome de exibição de cada admin ao entrar como "staff" — cada um com sua própria
+// identidade (sid próprio), em vez de uma "Administração" genérica compartilhada.
+const NOME_ADMIN = {
+  recepcao: "Recepção",
+  raquel: "Raquel (Admin)",
+  isabelle: "Isabelle (Admin)",
+  monique: "Monique (Admin)",
+};
 // 👑 Dona do app (comunidade + clube): painel profundo, gestão de admins, tudo.
 const SUPER_ADMIN = "raquel";
 // Permissões selecionáveis (a dona marca o que cada pessoa pode fazer)
@@ -1660,7 +1668,7 @@ function lerImagem(f, cb, maxLado = 640) {
 }
 
 // ---------- Login ----------
-function TelaLogin({ allData, carregando, onEntrar, entrarDemo, onParceiro, adminLiberado, entrarStaff }) {
+function TelaLogin({ allData, carregando, onEntrar, entrarDemo, onParceiro, adminLiberado, entrarStaff, nomeAdminAtual }) {
   const [nome, setNome] = useState("");
   const [senha, setSenha] = useState("");
   const [erro, setErro] = useState("");
@@ -1728,7 +1736,7 @@ function TelaLogin({ allData, carregando, onEntrar, entrarDemo, onParceiro, admi
               ...btnFantasma(), textAlign: "center", color: C.oak, marginTop: 12,
               border: `1px solid ${C.oak}66`, borderRadius: 10, padding: "10px", fontWeight: 800,
             }}>
-              🔒 Entrar como Administração
+              🔒 Entrar como {nomeAdminAtual || "Administração"}
             </button>
           )}
         </div>
@@ -1954,7 +1962,12 @@ export default function App() {
       else {
         try {
           const raw = await window.storage.get(K_ADMIN, false);
-          if (raw && Object.values(ADMINS).includes(raw.value)) setAdmin(true);
+          const pinRaw = raw && raw.value;
+          const uRaw = pinRaw ? Object.keys(ADMINS).find((u) => ADMINS[u] === pinRaw) : null;
+          if (uRaw) {
+            setAdmin(true);
+            setAdminInfo({ usuario: uRaw, super: uRaw === SUPER_ADMIN, perms: { ...PERMISSOES_LEGADO }, unidade: UNIDADE });
+          }
         } catch { /* segue sem admin */ }
       }
       const lm = await lerLocal(K_LEMBRETES);
@@ -2923,10 +2936,20 @@ export default function App() {
   }
 
   if (!sessao) {
+    const uAdmin = (adminInfo && adminInfo.usuario) || "";
+    const nomeAdminAtual = NOME_ADMIN[uAdmin] || (uAdmin ? `${uAdmin.charAt(0).toUpperCase()}${uAdmin.slice(1)} (Admin)` : "Administração");
     return shell(
       <TelaLogin allData={allData} carregando={carregando} onEntrar={entrar}
         adminLiberado={admin}
-        entrarStaff={() => entrar({ track: "staff", sid: "gestao", name: "Administração", staff: true })}
+        nomeAdminAtual={nomeAdminAtual}
+        entrarStaff={() => {
+          entrar({
+            track: "staff",
+            sid: uAdmin ? `gestao-${uAdmin}` : "gestao",
+            name: nomeAdminAtual,
+            staff: true,
+          });
+        }}
         entrarDemo={bancoVazio ? entrarDemo : null} onParceiro={entrarParceiro} />,
       true
     );
