@@ -1166,6 +1166,7 @@ export default function App() {
   const [syncMsg, setSyncMsg] = useState("");
   const avisar = (m) => { setSyncMsg(m); setTimeout(() => setSyncMsg(""), 6000); };
   const [newPhone, setNewPhone] = useState("");
+  const [newGenero, setNewGenero] = useState("");
   const [recMode, setRecMode] = useState(false);
   const [rcName, setRcName] = useState("");
   const [rcPhone, setRcPhone] = useState("");
@@ -3225,7 +3226,7 @@ export default function App() {
           {/* Cadastrar aluno direto por aqui */}
           {!novoCad ? (
             <button
-              onClick={() => setNovoCad({ nome: "", fone: "", senha: "", track: TRACKS[0].id, erro: "" })}
+              onClick={() => setNovoCad({ nome: "", fone: "", senha: "", genero: "", track: TRACKS[0].id, erro: "" })}
               className="w-full rounded-lg px-4 py-2.5 mb-3 font-bold"
               style={{ background: C.amber, color: C.bg, fontSize: 13 }}
             >
@@ -3265,6 +3266,16 @@ export default function App() {
               >
                 {TRACKS.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
               </select>
+              <select
+                value={novoCad.genero}
+                onChange={(e) => setNovoCad({ ...novoCad, genero: e.target.value, erro: "" })}
+                className="rounded-lg px-3 py-2 outline-none"
+                style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: novoCad.genero ? C.cream : C.mut, fontSize: 13 }}
+              >
+                <option value="">Gênero (M/F — para as mensagens da Comunidade)</option>
+                <option value="F">Feminino</option>
+                <option value="M">Masculino</option>
+              </select>
               {novoCad.erro && <div style={{ color: "#C96A76", fontSize: 11.5 }}>{novoCad.erro}</div>}
               <div className="flex gap-2">
                 <button
@@ -3281,13 +3292,16 @@ export default function App() {
                     if (senha.length < 4) {
                       setNovoCad({ ...novoCad, erro: "A senha precisa ter ao menos 4 caracteres." }); return;
                     }
+                    if (novoCad.genero !== "M" && novoCad.genero !== "F") {
+                      setNovoCad({ ...novoCad, erro: "Selecione o gênero (M/F) — usado nas mensagens da Comunidade." }); return;
+                    }
                     const jaTem = TRACKS.some((t) => ((allData[t.id] || {}).students || [])
                       .some((s) => s.name.toLowerCase() === nome.toLowerCase() || (s.phone && normPhone(s.phone) === fone)));
                     if (jaTem) {
                       setNovoCad({ ...novoCad, erro: "Já existe um cadastro com esse nome ou telefone." }); return;
                     }
                     mutateTrack(novoCad.track, (d) => {
-                      d.students.push({ id: novoId(), name: nome, pass: senha, phone: fone, friends: 0, guests: [], records: [], approved: true });
+                      d.students.push({ id: novoId(), name: nome, pass: senha, phone: fone, genero: novoCad.genero, friends: 0, guests: [], records: [], approved: true });
                     });
                     setNovoCad(null);
                     avisar(`✓ ${nome.split(" ")[0]} cadastrada e já liberada!`);
@@ -3321,6 +3335,7 @@ export default function App() {
                         <div className="truncate" style={{ color: C.cream, fontWeight: 700, fontSize: 13 }}>
                           {s.name}
                           {s.approved === false && <span className="ml-1" style={{ color: C.amberSoft, fontSize: 10 }}>⏳</span>}
+                          {!s.genero && <span className="ml-1" title="Sem gênero cadastrado — não aparece no Radar da Comunidade" style={{ color: C.oak, fontSize: 10 }}>⚧ sem gênero</span>}
                         </div>
                         <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 10.5, color: C.mut }}>
                           {t.short || t.label}
@@ -3330,7 +3345,7 @@ export default function App() {
                         </div>
                       </div>
                       <button
-                        onClick={() => setEditC({ tid: t.id, sid: s.id, name: s.name, phone: s.phone ? normPhone(s.phone) : "", pass: s.pass || "" })}
+                        onClick={() => setEditC({ tid: t.id, sid: s.id, name: s.name, phone: s.phone ? normPhone(s.phone) : "", pass: s.pass || "", genero: s.genero || "" })}
                         className="shrink-0 rounded px-1" title="Editar nome, WhatsApp e senha"
                         style={{ background: "transparent", border: "none", fontSize: 13, cursor: "pointer", opacity: 0.8 }}
                       >✏️</button>
@@ -3360,6 +3375,14 @@ export default function App() {
                         placeholder="Senha (mín. 4) — vazio mantém a atual"
                         className="rounded px-2.5 py-1.5 outline-none"
                         style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: C.cream, fontSize: 13, fontFamily: "'DM Mono', monospace" }} />
+                      <select value={editC.genero}
+                        onChange={(e) => setEditC({ ...editC, genero: e.target.value })}
+                        className="rounded px-2.5 py-1.5 outline-none"
+                        style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: editC.genero ? C.cream : C.mut, fontSize: 13 }}>
+                        <option value="">Gênero não informado</option>
+                        <option value="F">Feminino</option>
+                        <option value="M">Masculino</option>
+                      </select>
                       <div className="flex gap-1.5">
                         <button
                           onClick={() => {
@@ -3377,6 +3400,7 @@ export default function App() {
                               s2.name = nm;
                               if (ph) s2.phone = ph; else delete s2.phone;
                               if (pw) s2.pass = pw;
+                              if (editC.genero === "M" || editC.genero === "F") s2.genero = editC.genero; else delete s2.genero;
                               const fix = (e) => { if (e && e.id === editC.sid) e.name = nm; };
                               const w = d.winners || {};
                               Object.values(w.missions || {}).forEach(fix);
@@ -4163,13 +4187,17 @@ export default function App() {
       setNameErr("Digite seu WhatsApp com DDD, só números, sem espaços (ex.: 18999342345).");
       return;
     }
+    if (newGenero !== "M" && newGenero !== "F") {
+      setNameErr("Selecione seu gênero — a Comunidade usa isso pra te chamar certinho nas mensagens.");
+      return;
+    }
     const nid = novoId();
-    mutate((d) => d.students.push({ id: nid, name, pass: pw, phone: ph, friends: 0, guests: [], records: [], approved: admin }));
+    mutate((d) => d.students.push({ id: nid, name, pass: pw, phone: ph, genero: newGenero, friends: 0, guests: [], records: [], approved: admin }));
     const nu = { ...unlocks, [nid]: pw };
     setUnlocks(nu); saveUnlocks(nu);
     const nm = { ...myIds, [track]: nid };
     setMyIds(nm); saveMyIds(nm);
-    setNewName(""); setNewPass(""); setNewPhone("");
+    setNewName(""); setNewPass(""); setNewPhone(""); setNewGenero("");
     setNameErr("");
     if (!admin) { setShowSignup(false); setRegOk(true); setTimeout(() => setRegOk(false), 6000); }
   };
@@ -4499,6 +4527,16 @@ export default function App() {
                 <div style={{ color: C.mut, fontSize: 11, marginTop: -4 }}>
                   📱 Usado apenas para recuperar sua senha e contatos do desafio — só a administração vê.
                 </div>
+                <select
+                  value={newGenero}
+                  onChange={(e) => { setNewGenero(e.target.value); setNameErr(""); }}
+                  className="rounded-lg px-4 py-3 outline-none"
+                  style={{ background: C.panelSoft, border: `1px solid ${C.line}`, color: newGenero ? C.cream : C.mut }}
+                >
+                  <option value="">Gênero (para a Comunidade te chamar certinho)</option>
+                  <option value="F">Feminino</option>
+                  <option value="M">Masculino</option>
+                </select>
                 <button onClick={addStudent} className="rounded-lg py-3 font-bold" style={{ background: C.amber, color: C.cream }}>
                   Entrar no desafio
                 </button>

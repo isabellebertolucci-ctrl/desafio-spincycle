@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { escolherMsgRadar, categoriaInatividade } from "./RADAR_MSGS_400";
 
 /* ============================================================
    COMUNIDADE SPINCYCLE — v2
@@ -685,6 +686,48 @@ function gerarComentariosDemo(posts, alunos) {
 }
 
 // ---------- Motor do Radar: eventos automáticos a partir do Desafio ----------
+// ---------- Radar: progresso incremental (quando cada missão foi fechada) ----------
+// Reconstrói a cartela passo a passo, na ordem real dos eventos (aulas + convidados),
+// e devolve o momento exato em que cada missão virou "feita". Isso permite dizer
+// "essa foi a Nª missão de fulano" e "falta só esta pra fechar tudo".
+function progressoIncrementos(student, targets) {
+  const recs = (student.records || []).filter((r) => r.status === "ok" && r.reg).map((r) => ({ ...r, _tipo: "rec" }));
+  const guests = (student.guests || []).filter((g) => g.status === "ok" && g.reg).map((g) => ({ ...g, _tipo: "guest" }));
+  const itens = [...recs, ...guests].sort((a, b) => (a.reg || 0) - (b.reg || 0));
+  let doneAnterior = MISSION_BASE.map(() => false);
+  const recAcc = [], gAcc = [];
+  const out = [];
+  itens.forEach((item) => {
+    if (item._tipo === "rec") recAcc.push(item); else gAcc.push(item);
+    const prog = computeProgress({ records: recAcc, guests: gAcc }, targets);
+    prog.done.forEach((v, idx) => {
+      if (v && !doneAnterior[idx]) {
+        out.push({ ts: item.reg, n: prog.doneCount, missao: MISSION_BASE[idx].name, idx, doneArr: prog.done });
+      }
+    });
+    doneAnterior = prog.done;
+  });
+  return out;
+}
+
+// ---------- Radar: dias corridos de aula dobrada no mesmo dia ----------
+function diasComAulaDobrada(student) {
+  const recs = (student.records || []).filter((r) => r.status === "ok");
+  const porData = {};
+  recs.forEach((r) => { (porData[r.date] = porData[r.date] || []).push(r); });
+  const dias = [];
+  Object.entries(porData).forEach(([data, lista]) => {
+    const mins = [...new Set(lista.map((r) => slotMin(r.slot)))].sort((a, b) => a - b);
+    let dobrou = false;
+    for (let i = 1; i < mins.length; i++) if (mins[i] - mins[i - 1] <= 60) { dobrou = true; break; }
+    if (dobrou) {
+      const ultimoTs = lista.reduce((m, r) => Math.max(m, r.reg || 0), 0);
+      dias.push({ data, ts: ultimoTs });
+    }
+  });
+  return dias;
+}
+
 function gerarEventos(allData, gdata) {
   const ev = [];
   TRACKS.forEach((t) => {
@@ -693,31 +736,37 @@ function gerarEventos(allData, gdata) {
     d.students.forEach((s) => {
       if (s.approved === false) return;
       const nome = firstName(s.name);
+      const genero = s.genero === "M" || s.genero === "F" ? s.genero : null;
       const recsOk = (s.records || []).filter((r) => r.status === "ok");
 
+      // Sem gênero cadastrado: aluno não entra no Radar (mensagens dinâmicas
+      // exigem M/F). Combinado com Raquel — evita mensagem no gênero errado.
+      if (!genero) return;
+
+      // ---------- 1) Madrugada (Nª vez) ----------
       const madrugas = recsOk.filter((r) => r.slot === "06:15").sort((a, b) => (a.reg || 0) - (b.reg || 0));
       madrugas.forEach((r, i) => {
         const n = i + 1;
         if (n < 2) return;
-        const ord = ["", "", "SEGUNDA", "TERCEIRA", "QUARTA", "QUINTA", "SEXTA", "SÉTIMA", "OITAVA", "NONA", "DÉCIMA"][n] || `${n}ª`;
+        const id = `madruga-${t.id}-${s.id}-${n}`;
+        const texto = escolherMsgRadar("madrugada", genero, id, { nome, n });
         ev.push({
-          id: `madruga-${t.id}-${s.id}-${n}`,
-          ts: r.reg || 0, icon: "☕",
-          titulo: `🥷 ${nome} acordou às 5h50 pela ${ord} vez.`,
-          corpo: n >= (t.targets.madruga || 5)
-            ? "O Madrugador é dele(a).\nAlguém dá um café pra essa pessoa."
-            : "O sol nem nasceu e o pedal já girou.",
+          id, ts: r.reg || 0, icon: "☕",
+          titulo: texto || `🥷 ${nome} acordou às 5h50 pela ${n}ª vez.`,
+          corpo: n >= (t.targets.madruga || 5) ? "O Madrugador é dele(a). 🥇" : "O sol nem nasceu e o pedal já girou.",
           sid: s.id, track: t.id,
         });
       });
 
+      // ---------- 2) Convidados trazidos (Nº) ----------
       const gok = (s.guests || []).filter((g) => g.status === "ok").sort((a, b) => (a.reg || 0) - (b.reg || 0));
       gok.forEach((g, i) => {
         const n = i + 1;
+        const id = `amigo-${t.id}-${s.id}-${n}`;
+        const texto = escolherMsgRadar("convidados", genero, id, { nome, n });
         ev.push({
-          id: `amigo-${t.id}-${s.id}-${n}`,
-          ts: g.reg || 0, icon: "📣",
-          titulo: `👏 ${nome} trouxe o ${n}º convidado.`,
+          id, ts: g.reg || 0, icon: "📣",
+          titulo: texto || `👏 ${nome} trouxe o ${n}º convidado.`,
           corpo: n >= 3 ? "Daqui a pouco a recepção vira fila de show." : "A bike do lado nunca fica vazia.",
           sid: s.id, track: t.id,
         });
@@ -733,6 +782,102 @@ function gerarEventos(allData, gdata) {
         });
       });
 
+      // ---------- 3) Aula dobrada no mesmo dia ----------
+      diasComAulaDobrada(s).forEach(({ data, ts }, i) => {
+        const id = `dobra-${t.id}-${s.id}-${data}`;
+        const texto = escolherMsgRadar("aula_dobrada", genero, id, { nome });
+        ev.push({
+          id, ts, icon: "🥤",
+          titulo: texto || `${nome} fez 2 aulas no mesmo dia.`,
+          corpo: "Dose dupla de energia.",
+          sid: s.id, track: t.id,
+        });
+      });
+
+      // ---------- 4/6/7) Progresso de missões, quase-desafio e missão específica ----------
+      const incrementos = progressoIncrementos(s, t.targets);
+      incrementos.forEach((inc) => {
+        if (inc.n >= 9) return; // a 9ª (cartela cheia) tem o evento especial "cheia" abaixo
+        const id = `missao-${t.id}-${s.id}-${inc.n}`;
+        const texto = escolherMsgRadar("progresso_missao", genero, id, { nome, n: inc.n });
+        ev.push({
+          id, ts: inc.ts, icon: "🎯",
+          titulo: texto || `${nome} completou a missão nº ${inc.n}.`,
+          corpo: `${MISSION_BASE[inc.idx].name} concluída.`,
+          sid: s.id, track: t.id,
+        });
+
+        // Falta só 1 missão pra fechar tudo
+        if (inc.n === 8) {
+          const faltante = MISSION_BASE.find((m, idx) => !inc.doneArr[idx]);
+          if (faltante) {
+            const idFalta = `falta1-${t.id}-${s.id}`;
+            const textoFalta = escolherMsgRadar("missao_especifica", genero, idFalta, { nome, missao: faltante.name });
+            ev.push({
+              id: idFalta, ts: inc.ts, icon: "🔔",
+              titulo: textoFalta || `${nome}, falta só ${faltante.name} pra fechar tudo!`,
+              corpo: "Bora, comunidade, dá aquele empurrão.",
+              sid: s.id, track: t.id,
+            });
+          }
+        }
+
+        // Quase completando o desafio (70%+ e ainda não fechou)
+        if (inc.n === 7) {
+          const pct = Math.round((inc.n / 9) * 100);
+          const idPct = `quase-${t.id}-${s.id}`;
+          const textoPct = escolherMsgRadar("quase_desafio", genero, idPct, { nome, pct });
+          ev.push({
+            id: idPct, ts: inc.ts, icon: "📈",
+            titulo: textoPct || `${nome} já tá em ${pct}% do desafio!`,
+            corpo: "Vamos mandar mensagem de incentivo, minha gente.",
+            sid: s.id, track: t.id,
+          });
+        }
+      });
+
+      // ---------- 5) Inatividade (5 / 15 / 30 dias sem check-in) ----------
+      const ultimoRegAtivo = recsOk.reduce((m, r) => Math.max(m, r.reg || 0), 0);
+      if (ultimoRegAtivo > 0) {
+        const dias = Math.floor((Date.now() - ultimoRegAtivo) / 86400000);
+        const tier = categoriaInatividade(dias);
+        if (tier) {
+          const id = `inativ-${t.id}-${s.id}-${tier}`;
+          const texto = escolherMsgRadar(tier, genero, id, { nome, dias });
+          ev.push({
+            id, ts: Date.now(), icon: "📵",
+            titulo: texto || `${nome} não faz check-in há ${dias} dias.`,
+            corpo: "Vamos mandar um incentivo pra ele(a) voltar.",
+            sid: s.id, track: t.id,
+          });
+        }
+      }
+
+      // ---------- 8) Frequência baixa mas constante ----------
+      // Critério: pelo menos 3 aulas registradas, presença "espaçada mas nunca
+      // sumida" (maior intervalo entre check-ins fica entre 4 e 10 dias) e
+      // ainda ativo (última aula há no máximo 10 dias, senão já virou inatividade).
+      if (recsOk.length >= 3 && ultimoRegAtivo > 0) {
+        const diasDesdeUltima = Math.floor((Date.now() - ultimoRegAtivo) / 86400000);
+        const datasOrdenadas = [...new Set(recsOk.map((r) => r.date))].sort();
+        let maiorIntervalo = 0;
+        for (let i = 1; i < datasOrdenadas.length; i++) {
+          const gap = dayIndex(datasOrdenadas[i]) - dayIndex(datasOrdenadas[i - 1]);
+          maiorIntervalo = Math.max(maiorIntervalo, gap);
+        }
+        if (diasDesdeUltima <= 10 && maiorIntervalo >= 4 && maiorIntervalo <= 10) {
+          const id = `freqbaixa-${t.id}-${s.id}`;
+          const texto = escolherMsgRadar("frequencia_baixa", genero, id, { nome });
+          ev.push({
+            id, ts: ultimoRegAtivo, icon: "🐢",
+            titulo: texto || `${nome} vem no seu ritmo, mas não desiste.`,
+            corpo: "Devagar também se chega lá.",
+            sid: s.id, track: t.id,
+          });
+        }
+      }
+
+      // ---------- Linhas e cartela cheia (mantidos como já eram) ----------
       const prog = computeProgress(s, t.targets);
       if (prog.linesDone.length > 0) {
         const ultimoReg = recsOk.reduce((m, r) => Math.max(m, r.reg || 0), 0);
