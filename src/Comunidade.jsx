@@ -394,6 +394,7 @@ const K = {
   relampago: `spincycle-comunidade-v1-${UNIDADE}-relampago`,
   indicacoes: `spincycle-comunidade-v1-${UNIDADE}-indicacoes`,
   equipe: `spincycle-comunidade-v1-${UNIDADE}-equipe`,
+  gestaoApp: `spincycle-comunidade-v1-${UNIDADE}-gestao-app`,
 };
 
 // Regras do programa "Indicar um Amigo" — ticket dourado a cada indicação confirmada.
@@ -1438,6 +1439,15 @@ function seloSvgHtml(chaveSvg, cor) {
   const vbAttr = s.viewBox || `-${s.vb / 2} -${s.vb / 2} ${s.vb} ${s.vb}`;
   return `<svg viewBox="${vbAttr}" width="100%" height="100%" style="color:${cor}">${s.svg}</svg>`;
 }
+// ---------- Ícone da Arena (silhueta de estádio, vetor original enviado pela Raquel) ----------
+const ARENA_SVG_INNER = `<defs><clipPath id="370515748d"><path d="M 243.078125 557 L 346 557 L 346 653 L 243.078125 653 Z M 243.078125 557 " clip-rule="nonzero"/></clipPath><clipPath id="132d6f9325"><path d="M 243.078125 495 L 559 495 L 559 607 L 243.078125 607 Z M 243.078125 495 " clip-rule="nonzero"/></clipPath><clipPath id="a6472661c2"><path d="M 369 604 L 432 604 L 432 657.457031 L 369 657.457031 Z M 369 604 " clip-rule="nonzero"/></clipPath><clipPath id="fd066ef5ba"><path d="M 243.078125 354.605469 L 566.921875 354.605469 L 566.921875 489 L 243.078125 489 Z M 243.078125 354.605469 " clip-rule="nonzero"/></clipPath></defs><path fill="currentColor" d="M 321.117188 539.6875 L 321.117188 513.707031 C 312.308594 519.179688 305.132812 525.597656 300.136719 532.75 C 306.699219 535.324219 313.722656 537.636719 321.117188 539.6875 Z M 321.117188 539.6875 " fill-opacity="1" fill-rule="nonzero"/><g clip-path="url(#370515748d)"><path fill="currentColor" d="M 243.179688 557.117188 L 243.179688 583.238281 C 243.179688 615.054688 285.910156 642.253906 345.753906 652.785156 L 345.753906 611.957031 C 294.332031 603.027344 256.46875 582.234375 243.179688 557.117188 Z M 243.179688 557.117188 " fill-opacity="1" fill-rule="nonzero"/></g><path fill="currentColor" d="M 326.335938 541.082031 C 347.78125 546.519531 372.199219 549.667969 398.113281 549.867188 L 398.113281 512.09375 L 326.335938 512.09375 Z M 326.335938 541.082031 " fill-opacity="1" fill-rule="nonzero"/><path fill="currentColor" d="M 538.761719 511.402344 C 530.4375 480.671875 470.378906 456.777344 400.722656 456.777344 C 331.035156 456.777344 271.007812 480.664062 262.679688 511.402344 C 266.511719 514.675781 270.863281 517.792969 275.664062 520.742188 C 289.746094 491.175781 341.496094 470 400.722656 470 C 459.949219 470 511.695312 491.175781 525.785156 520.742188 C 530.582031 517.792969 534.933594 514.675781 538.761719 511.402344 Z M 538.761719 511.402344 " fill-opacity="1" fill-rule="nonzero"/><path fill="currentColor" d="M 475.109375 512.09375 L 403.332031 512.09375 L 403.332031 549.867188 C 429.246094 549.664062 453.660156 546.519531 475.109375 541.082031 Z M 475.109375 512.09375 " fill-opacity="1" fill-rule="nonzero"/><path fill="currentColor" d="M 521.253906 523.398438 C 508.390625 495.359375 458.34375 475.210938 400.722656 475.210938 C 343.097656 475.210938 293.050781 495.359375 280.191406 523.398438 C 284.84375 526.003906 289.851562 528.457031 295.207031 530.738281 C 312.179688 505.359375 354.164062 488.433594 400.722656 488.433594 C 447.28125 488.433594 489.265625 505.359375 506.238281 530.738281 C 511.59375 528.460938 516.601562 526.003906 521.253906 523.398438 Z M 521.253906 523.398438 " fill-opacity="1" fill-rule="nonzero"/><path fill="currentColor" d="M 480.324219 513.707031 L 480.324219 539.6875 C 487.722656 537.636719 494.746094 535.324219 501.308594 532.75 C 496.3125 525.597656 489.132812 519.179688 480.324219 513.707031 Z M 480.324219 513.707031 " fill-opacity="1" fill-rule="nonzero"/><path fill="currentColor" d="M 467.40625 506.875 C 448.761719 498.511719 425.445312 493.65625 400.722656 493.65625 C 375.996094 493.65625 352.679688 498.511719 334.035156 506.875 Z M 467.40625 506.875 " fill-opacity="1" fill-rule="nonzero"/><path fill="currentColor" d="M 553.292969 494.210938 C 535.265625 461.261719 472.890625 438.339844 400.722656 438.339844 C 328.558594 438.339844 266.179688 461.261719 248.148438 494.210938 C 250.679688 498.832031 254.148438 503.277344 258.429688 507.507812 C 269.808594 475.339844 329.460938 451.5625 400.722656 451.5625 C 471.953125 451.5625 531.632812 475.34375 543.015625 507.507812 C 547.292969 503.277344 550.761719 498.832031 553.292969 494.210938 Z M 553.292969 494.210938 " fill-opacity="1" fill-rule="nonzero"/><path fill="currentColor" d="M 431.519531 564.332031 C 429.5625 564.332031 427.96875 565.917969 427.96875 567.871094 C 427.96875 569.820312 429.5625 571.40625 431.519531 571.40625 C 433.480469 571.40625 435.070312 569.820312 435.070312 567.871094 C 435.070312 565.921875 433.480469 564.332031 431.519531 564.332031 Z M 431.519531 564.332031 " fill-opacity="1" fill-rule="nonzero"/><g clip-path="url(#132d6f9325)"><path fill="currentColor" d="M 543.890625 513.433594 C 543.625 513.878906 543.210938 514.207031 542.722656 514.433594 C 538.015625 518.523438 532.609375 522.402344 526.546875 526.007812 C 526.269531 526.359375 525.933594 526.667969 525.484375 526.84375 C 525.289062 526.917969 525.089844 526.929688 524.890625 526.957031 C 519.378906 530.132812 513.363281 533.089844 506.910156 535.804688 C 506.789062 535.914062 506.695312 536.050781 506.550781 536.140625 C 506.160156 536.378906 505.738281 536.464844 505.3125 536.484375 C 497.164062 539.828125 488.347656 542.792969 478.960938 545.316406 C 478.585938 545.523438 478.175781 545.675781 477.714844 545.675781 C 477.695312 545.675781 477.679688 545.664062 477.660156 545.660156 C 454.734375 551.691406 428.535156 555.117188 400.722656 555.117188 C 372.910156 555.117188 346.710938 551.691406 323.785156 545.660156 C 323.765625 545.660156 323.746094 545.675781 323.726562 545.675781 C 323.265625 545.675781 322.855469 545.523438 322.480469 545.316406 C 313.128906 542.800781 304.339844 539.851562 296.21875 536.519531 C 295.765625 536.515625 295.304688 536.394531 294.890625 536.144531 C 294.746094 536.054688 294.652344 535.917969 294.53125 535.808594 C 288.070312 533.085938 282.046875 530.128906 276.53125 526.949219 C 276.339844 526.917969 276.144531 526.921875 275.953125 526.847656 C 275.507812 526.671875 275.171875 526.359375 274.894531 526.007812 C 268.914062 522.457031 263.582031 518.636719 258.925781 514.609375 C 258.28125 514.386719 257.78125 513.945312 257.484375 513.371094 C 251.40625 507.890625 246.625 502.027344 243.304688 495.871094 C 243.261719 495.820312 243.21875 495.78125 243.179688 495.730469 L 243.179688 537.140625 C 243.179688 568.058594 284.273438 595.792969 345.753906 606.660156 L 345.753906 583.238281 C 345.753906 581.800781 346.925781 580.632812 348.363281 580.632812 L 453.078125 580.632812 C 454.515625 580.632812 455.683594 581.800781 455.683594 583.238281 L 455.683594 606.660156 C 517.167969 595.792969 558.261719 568.058594 558.261719 537.140625 L 558.261719 495.730469 C 558.222656 495.78125 558.179688 495.820312 558.136719 495.863281 C 554.808594 502.042969 550.003906 507.933594 543.890625 513.433594 Z M 369.921875 576.628906 C 365.089844 576.628906 361.15625 572.703125 361.15625 567.875 C 361.15625 563.042969 365.089844 559.117188 369.921875 559.117188 C 374.757812 559.117188 378.691406 563.046875 378.691406 567.875 C 378.691406 572.699219 374.757812 576.628906 369.921875 576.628906 Z M 400.722656 576.628906 C 395.886719 576.628906 391.957031 572.703125 391.957031 567.875 C 391.957031 563.042969 395.886719 559.117188 400.722656 559.117188 C 405.558594 559.117188 409.492188 563.046875 409.492188 567.875 C 409.492188 572.699219 405.554688 576.628906 400.722656 576.628906 Z M 431.519531 576.628906 C 426.683594 576.628906 422.753906 572.703125 422.753906 567.875 C 422.753906 563.042969 426.683594 559.117188 431.519531 559.117188 C 436.355469 559.117188 440.289062 563.046875 440.289062 567.875 C 440.289062 572.699219 436.355469 576.628906 431.519531 576.628906 Z M 431.519531 576.628906 " fill-opacity="1" fill-rule="nonzero"/></g><path fill="currentColor" d="M 400.722656 564.332031 C 398.765625 564.332031 397.171875 565.917969 397.171875 567.871094 C 397.171875 569.820312 398.765625 571.40625 400.722656 571.40625 C 402.679688 571.40625 404.273438 569.820312 404.273438 567.871094 C 404.273438 565.921875 402.679688 564.332031 400.722656 564.332031 Z M 400.722656 564.332031 " fill-opacity="1" fill-rule="nonzero"/><path fill="currentColor" d="M 350.972656 653.640625 C 355.3125 654.324219 359.734375 654.917969 364.234375 655.421875 L 364.234375 601.675781 C 364.234375 600.238281 365.402344 599.070312 366.839844 599.070312 L 434.601562 599.070312 C 436.039062 599.070312 437.207031 600.238281 437.207031 601.675781 L 437.207031 655.425781 C 441.707031 654.917969 446.128906 654.324219 450.472656 653.644531 L 450.472656 585.847656 L 350.972656 585.847656 Z M 350.972656 653.640625 " fill-opacity="1" fill-rule="nonzero"/><path fill="currentColor" d="M 455.6875 611.957031 L 455.6875 652.789062 C 515.53125 642.257812 558.265625 615.058594 558.265625 583.238281 L 558.265625 557.117188 C 544.976562 582.234375 507.109375 603.027344 455.6875 611.957031 Z M 455.6875 611.957031 " fill-opacity="1" fill-rule="nonzero"/><g clip-path="url(#a6472661c2)"><path fill="currentColor" d="M 369.453125 655.980469 C 379.5625 656.945312 390.015625 657.457031 400.722656 657.457031 C 411.425781 657.457031 421.882812 656.945312 431.992188 655.980469 L 431.992188 604.285156 L 369.453125 604.285156 Z M 369.453125 655.980469 " fill-opacity="1" fill-rule="nonzero"/></g><path fill="currentColor" d="M 369.921875 564.332031 C 367.964844 564.332031 366.371094 565.917969 366.371094 567.871094 C 366.371094 569.820312 367.964844 571.40625 369.921875 571.40625 C 371.882812 571.40625 373.476562 569.820312 373.476562 567.871094 C 373.476562 565.921875 371.882812 564.332031 369.921875 564.332031 Z M 369.921875 564.332031 " fill-opacity="1" fill-rule="nonzero"/><g clip-path="url(#fd066ef5ba)"><path fill="currentColor" d="M 566.523438 401.480469 C 566.328125 400.34375 565.410156 399.472656 564.265625 399.335938 C 559.203125 398.722656 554.152344 397.714844 549.261719 396.339844 C 546.21875 395.484375 543.1875 394.480469 540.253906 393.347656 C 539.449219 393.035156 538.546875 393.144531 537.839844 393.628906 C 537.128906 394.117188 536.707031 394.917969 536.707031 395.78125 L 536.707031 414.164062 C 536.707031 414.203125 536.707031 414.238281 536.707031 414.273438 L 536.707031 438.273438 C 509.746094 416.605469 460.160156 401.929688 403.328125 401.492188 L 403.328125 377.527344 L 426.523438 365.953125 C 427.554688 365.441406 428.125 364.3125 427.929688 363.175781 C 427.734375 362.042969 426.816406 361.171875 425.671875 361.03125 C 420.609375 360.417969 415.558594 359.410156 410.664062 358.039062 C 407.640625 357.1875 404.609375 356.179688 401.660156 355.039062 C 400.859375 354.730469 399.957031 354.835938 399.246094 355.320312 C 398.539062 355.808594 398.113281 356.617188 398.113281 357.472656 L 398.113281 375.859375 C 398.113281 375.894531 398.113281 375.933594 398.113281 375.96875 L 398.113281 401.492188 C 341.28125 401.929688 291.695312 416.605469 264.738281 438.269531 L 264.738281 415.828125 L 287.933594 404.257812 C 288.964844 403.746094 289.535156 402.613281 289.339844 401.480469 C 289.144531 400.34375 288.226562 399.472656 287.082031 399.335938 C 282.019531 398.722656 276.96875 397.714844 272.078125 396.339844 C 269.035156 395.484375 266.003906 394.480469 263.070312 393.347656 C 262.265625 393.035156 261.363281 393.144531 260.65625 393.628906 C 259.945312 394.117188 259.523438 394.917969 259.523438 395.78125 L 259.523438 414.164062 C 259.523438 414.203125 259.523438 414.238281 259.523438 414.273438 L 259.523438 442.8125 C 249.078125 452.726562 243.179688 463.882812 243.179688 475.679688 C 243.179688 480.019531 244.019531 484.265625 245.542969 488.402344 C 266.667969 455.628906 329.128906 433.121094 400.722656 433.121094 C 472.316406 433.121094 534.777344 455.628906 555.898438 488.402344 C 557.425781 484.265625 558.265625 480.019531 558.265625 475.679688 C 558.265625 463.882812 552.363281 452.726562 541.921875 442.8125 L 541.921875 415.828125 L 565.117188 404.257812 C 566.144531 403.746094 566.71875 402.613281 566.523438 401.480469 Z M 419.199219 426.507812 L 382.242188 426.507812 L 382.242188 408.070312 L 419.199219 408.070312 Z M 419.199219 426.507812 " fill-opacity="1" fill-rule="nonzero"/></g>`;
+function IconeArena({ size = 24, style }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 810 1012.49997" style={{ display: "block", ...style }}
+      dangerouslySetInnerHTML={{ __html: ARENA_SVG_INNER }} />
+  );
+}
+
 function Ic({ nome, size = 24, stroke = 1.8, style }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -1581,7 +1591,7 @@ function Reacoes({ postId, reacts, minhaChave, reagir, onVerQuem, respCount = 0,
             ))}
           </div>
         )}
-        {bolinha(minhaReacao || "🤍", () => setAbrirPicker(!abrirPicker), !!minhaReacao)}
+        {bolinha(minhaReacao || <span style={{ fontSize: 18, fontWeight: 700, lineHeight: 1 }}>+</span>, () => setAbrirPicker(!abrirPicker), !!minhaReacao)}
         <span style={{ minHeight: 12 }} />
       </span>
     </div>
@@ -1589,7 +1599,7 @@ function Reacoes({ postId, reacts, minhaChave, reagir, onVerQuem, respCount = 0,
 }
 
 // ---------- Cartão de post (Radar e Mural) ----------
-function PostCard({ e, fotos, reacts, minhaChave, reagir, onApagar, onAutor, seloTorcida, equipeAutor,
+function PostCard({ e, fotos, reacts, minhaChave, reagir, onApagar, onAutor, seloTorcida, gestaoAppAutor,
   comentarios = [], onComentar, onApagarComentario, podeApagarComentario, onVerQuem, onLido, extraInfo }) {
   const ehPostDePessoa = !!e.autorNome;
   const campanha = e.tipo === "campanha";
@@ -1612,7 +1622,7 @@ function PostCard({ e, fotos, reacts, minhaChave, reagir, onApagar, onAutor, sel
             <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
               <div style={{ fontWeight: 700, fontSize: 13.5, lineHeight: 1.35 }}>
                 {ehPostDePessoa
-                  ? <span onClick={onAutor || undefined} style={{ color: oficial ? C.oak : campanha ? C.tealSoft : C.cream, ...clicavel }}>{oficial ? "📌 " : campanha ? "🏷️ " : ""}{e.autorNome}{campanha ? " · Clube" : ""}{equipeAutor && <span title="Equipe Spincycle" style={{ marginLeft: 4, fontSize: 11 }}>🛡️</span>}</span>
+                  ? <span onClick={onAutor || undefined} style={{ color: oficial ? C.oak : campanha ? C.tealSoft : C.cream, ...clicavel }}>{oficial ? "📌 " : campanha ? "🏷️ " : ""}{e.autorNome}{campanha ? " · Clube" : ""}{gestaoAppAutor && <span title="Gestão do App" style={{ marginLeft: 4, fontSize: 11, color: C.teal }}>✓</span>}</span>
                   : <span onClick={onAutor || undefined} style={clicavel}>{e.titulo}</span>}
                 {seloTorcida && <span title="Você torce por essa pessoa" style={{ marginLeft: 5, fontSize: 11 }}>📣</span>}
               </div>
@@ -1712,7 +1722,7 @@ function TelaLogin({ allData, carregando, onEntrar, entrarDemo, onParceiro, admi
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", justifyContent: "center", padding: "0 24px", maxWidth: 440, margin: "0 auto" }}>
       <div style={{ textAlign: "center", marginBottom: 28 }}>
-        <Ic nome="urso" size={52} stroke={1.4} style={{ color: C.oak, margin: "0 auto 10px" }} />
+        <IconeArena size={52} style={{ color: C.oak, margin: "0 auto 10px" }} />
         <div style={{ fontWeight: 800, fontSize: 22, letterSpacing: 1 }}>COMUNIDADE</div>
         <div style={{ fontWeight: 800, fontSize: 22, letterSpacing: 1, color: C.teal }}>SPINCYCLE</div>
         {!modoParc && (
@@ -1831,6 +1841,13 @@ function NovoPost({ publicar, admin, podePostarOficial }) {
 export default function App() {
   const [tela, setTela] = useState("inicio");
   const [menuAberto, setMenuAberto] = useState(false);
+  const [larga, setLarga] = useState(typeof window !== "undefined" && window.innerWidth >= 900);
+  const [abaAdminLarga, setAbaAdminLarga] = useState("geral"); // geral | cadastros | clube | admins | missoes
+  useEffect(() => {
+    const aoRedimensionar = () => setLarga(window.innerWidth >= 900);
+    window.addEventListener("resize", aoRedimensionar);
+    return () => window.removeEventListener("resize", aoRedimensionar);
+  }, []);
   const [perfilVisto, setPerfilVisto] = useState(null); // { track, sid } da página de aluno aberta // inicio | mural | ranking | agenda | clube | cadastroClube | busca | global | perfil | fotosAlunos
   const [abaMural, setAbaMural] = useState("radar"); // radar | mural | novo
   const [filtroRadar, setFiltroRadar] = useState("todos"); // todos | torcida
@@ -1865,6 +1882,7 @@ export default function App() {
   const [giro175, setGiro175] = useState({});          // { chaveAluno: { ts, por } } — concedido manualmente pelo admin
   const [pacotes4, setPacotes4] = useState({});         // { chaveAluno: { ts, por } } — venda de 4 pacotes de 10, idem
   const [equipe, setEquipe] = useState({});             // { chaveAluno: { ts, por } } — marcado como Equipe Spincycle pelo admin
+  const [gestaoApp, setGestaoApp] = useState({});        // { chaveAluno: { ts, por } } — selo verificado, Gestão do App (só Raquel/Isabelle hoje)
   const [relampago, setRelampago] = useState({});       // { chaveAluno: { ts, por } } — ganhou Missão Relâmpago, idem
   const [agenda, setAgenda] = useState({ eventos: [] });
   const [lembretes, setLembretes] = useState([]);
@@ -1889,7 +1907,7 @@ export default function App() {
 
   const carregarLeves = async () => {
     if (demoRef.current) return;
-    const [il, pc, ps, gg, ma, rc, pf, ag, cb, cf, bs, mt, adr, prs, tc, cm, it, rd, g175, p4, relp, ind, eq] = await Promise.all([
+    const [il, pc, ps, gg, ma, rc, pf, ag, cb, cf, bs, mt, adr, prs, tc, cm, it, rd, g175, p4, relp, ind, eq, gap] = await Promise.all([
       lerShared(KEY_DESAFIO("ilimitado"), { students: [] }),
       lerShared(KEY_DESAFIO("pacote"), { students: [] }),
       lerShared(KEY_DESAFIO("passe"), { students: [] }),
@@ -1913,6 +1931,7 @@ export default function App() {
       lerShared(K.relampago, {}),
       lerShared(K.indicacoes, {}),
       lerShared(K.equipe, {}),
+      lerShared(K.gestaoApp, {}),
     ]);
     if (il !== undefined || pc !== undefined || ps !== undefined) {
       setAllData({
@@ -1938,6 +1957,7 @@ export default function App() {
     if (rd !== undefined) setRecados(rd || {});
     if (ind !== undefined) setIndicacoes(ind || {});
     if (eq !== undefined) setEquipe(eq || {});
+    if (gap !== undefined) setGestaoApp(gap || {});
     if (g175 !== undefined) setGiro175(g175 || {});
     if (p4 !== undefined) setPacotes4(p4 || {});
     if (relp !== undefined) setRelampago(relp || {});
@@ -2382,6 +2402,24 @@ export default function App() {
     } catch { avisar("⚠️ Falha ao salvar — tenta de novo."); }
   };
 
+  // 👤 Admin: editar cadastro de qualquer aluno (nome, telefone, gênero, senha, aprovação)
+  // Mesmo padrão seguro de sempre: leitura fresca da chave do Desafio + escrita pontual.
+  const salvarCadastroAluno = async (track, sid, patch) => {
+    const key = KEY_DESAFIO(track);
+    const base = await lerShared(key, { students: [] });
+    if (base === undefined) { avisar("⚠️ Sem conexão — nada foi salvo."); return false; }
+    const novo = JSON.parse(JSON.stringify(base || { students: [] }));
+    const s = (novo.students || []).find((x) => x.id === sid);
+    if (!s) { avisar("⚠️ Cadastro não encontrado."); return false; }
+    Object.assign(s, patch);
+    try {
+      await gravarShared(key, novo);
+      setAllData((prev) => ({ ...prev, [track]: novo }));
+      avisar("✅ Cadastro atualizado.");
+      return true;
+    } catch { avisar("⚠️ Falha ao salvar — tenta de novo."); return false; }
+  };
+
   const salvarPerfil = async (dados) => {
     if (!sessao) return;
     if (demo) {
@@ -2711,6 +2749,26 @@ export default function App() {
     } catch { avisar("⚠️ Falha ao salvar."); }
   };
 
+  // ✓ Gestão do App: selo verificado, exclusivo de quem administra o app de
+  // verdade (hoje: Raquel e Isabelle). Só super-admin concede.
+  const alternarGestaoApp = async (alvoChave) => {
+    const aplicar = (base) => {
+      const novo = { ...(base || {}) };
+      if (novo[alvoChave]) delete novo[alvoChave];
+      else novo[alvoChave] = { ts: Date.now(), por: sessao?.name || "admin" };
+      return novo;
+    };
+    if (demo) { setGestaoApp(aplicar(gestaoApp)); return; }
+    const base = await lerShared(K.gestaoApp, {});
+    if (base === undefined) { avisar("⚠️ Sem conexão."); return; }
+    const novo = aplicar(base);
+    try {
+      await gravarShared(K.gestaoApp, novo);
+      setGestaoApp(novo);
+      avisar(novo[alvoChave] ? "✓ Selo de Gestão do App concedido!" : "Selo de Gestão do App removido.");
+    } catch { avisar("⚠️ Falha ao salvar."); }
+  };
+
   // 🥚 Missão Relâmpago: easter egg pra quem ganhou — sem lista de vencedores
   // no app ainda, então também é concessão manual, mesmo padrão dos outros dois.
   const alternarRelampago = async (alvoChave) => {
@@ -2850,7 +2908,7 @@ export default function App() {
     reagir: (pid, em) => { regFraseLida(e.id); reagir(pid, em); },
     onLido: () => regFraseLida(e.id),
     onAutor: autorDe(e),
-    equipeAutor: !!(e.autorChave && equipe && equipe[e.autorChave]),
+    gestaoAppAutor: !!(e.autorChave && gestaoApp && gestaoApp[e.autorChave]),
     seloTorcida: minhaTorcidaSet.has(chaveDoPost(e)),
     comentarios: comentarios[e.id] || [],
     onComentar: (t) => comentar(e.id, t),
@@ -2969,6 +3027,102 @@ export default function App() {
         }}
         entrarDemo={bancoVazio ? entrarDemo : null} onParceiro={entrarParceiro} />,
       true
+    );
+  }
+
+  // ---------- Dashboard largo de admin (telas ≥900px) ----------
+  if (sessao.staff && larga) {
+    const abaBtnLarga = (id, rot, mostra = true) => mostra && (
+      <button key={id} onClick={() => setAbaAdminLarga(id)} style={{
+        display: "block", width: "100%", textAlign: "left", background: abaAdminLarga === id ? C.panelSoft : "transparent",
+        border: "none", borderLeft: `3px solid ${abaAdminLarga === id ? C.teal : "transparent"}`,
+        color: abaAdminLarga === id ? C.cream : C.mut, fontWeight: 700, fontSize: 13.5,
+        padding: "11px 16px", cursor: "pointer", fontFamily: "inherit",
+      }}>{rot}</button>
+    );
+    let painelAtivo;
+    if (abaAdminLarga === "cadastros") {
+      painelAtivo = <PainelCadastrosAlunos allData={allData} fotos={fotos} salvarCadastroAluno={salvarCadastroAluno} avisar={avisar} semCabecalho />;
+    } else if (abaAdminLarga === "clube" && clubeAcesso.ver) {
+      painelAtivo = <CadastroClube clube={clube} salvarClube={salvarClube} removerParceiro={removerParceiro}
+        lancarCampanha={lancarCampanha} metricas={metricas} acesso={clubeAcesso} semCabecalho voltar={() => {}} />;
+    } else if (abaAdminLarga === "admins" && adminSuper) {
+      painelAtivo = <TelaGestaoAdmins adminsReg={adminsReg} salvarAdmins={salvarAdmins} allData={allData} fotos={fotos} avisar={avisar} semCabecalho voltar={() => {}} />;
+    } else if (abaAdminLarga === "missoes") {
+      const linhas = TRACKS.map((t) => {
+        const alunos = ((allData[t.id] || {}).students || []);
+        const comProgresso = alunos.filter((s) => (s.records || []).length > 0 || (s.guests || []).length > 0);
+        const cartelaCheia = comProgresso.filter((s) => computeProgress(s, t.targets).full).length;
+        const ranking = [...comProgresso]
+          .map((s) => ({ nome: s.name, prog: computeProgress(s, t.targets) }))
+          .sort((a, b) => b.prog.doneCount - a.prog.doneCount || b.prog.p.maratona - a.prog.p.maratona)
+          .slice(0, 8);
+        return { t, alunos: alunos.length, comProgresso: comProgresso.length, cartelaCheia, ranking };
+      });
+      painelAtivo = (
+        <div style={{ display: "grid", gap: 18 }}>
+          <div style={{ color: C.oak, fontWeight: 800, fontSize: 16, letterSpacing: 0.5 }}>🏟️ MISSÕES · VISÃO GERAL</div>
+          <div style={{ color: C.mut, fontSize: 12.5, lineHeight: 1.5 }}>
+            Edição de missões, prêmios e Missões Relâmpago ainda é feita no app do Desafio — aqui é só leitura e acompanhamento.
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: `repeat(${linhas.length}, 1fr)`, gap: 14 }}>
+            {linhas.map(({ t, alunos, comProgresso, cartelaCheia, ranking }) => (
+              <Painel key={t.id} style={{ display: "grid", gap: 10 }}>
+                <div style={{ fontWeight: 800, fontSize: 13.5 }}>{t.label}</div>
+                <div style={{ display: "flex", gap: 14, fontSize: 12, color: C.mut }}>
+                  <span><b style={{ color: C.tealSoft }}>{alunos}</b> cadastrados</span>
+                  <span><b style={{ color: C.tealSoft }}>{comProgresso}</b> ativos</span>
+                  <span><b style={{ color: C.oak }}>{cartelaCheia}</b> cartela cheia</span>
+                </div>
+                <div style={{ borderTop: `1px solid ${C.line}`, paddingTop: 8, display: "grid", gap: 5 }}>
+                  {ranking.map((r, i) => (
+                    <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{i + 1}. {r.nome}</span>
+                      <span style={{ color: C.oak, fontWeight: 800, flexShrink: 0, marginLeft: 8 }}>{r.prog.doneCount}/9</span>
+                    </div>
+                  ))}
+                  {ranking.length === 0 && <div style={{ color: C.mut, fontSize: 11.5 }}>Ninguém pontuou ainda.</div>}
+                </div>
+              </Painel>
+            ))}
+          </div>
+        </div>
+      );
+    } else {
+      painelAtivo = <TelaPainelAdm metricas={metricas} clube={clube} fotos={fotos} allData={allData}
+        muralAlunos={muralAlunos} reacts={reacts} comentarios={comentarios}
+        profundo={adminSuper || !!adminPerms.painelCompleto} presenca={presenca}
+        abrirPerfilAluno={abrirPerfilAluno} irAdmins={null} semCabecalho voltar={() => {}} />;
+    }
+    return (
+      <div style={{ minHeight: "100vh", background: C.bg, color: C.cream, fontFamily: "'Montserrat', sans-serif", display: "flex" }}>
+        <style>{`@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&display=swap'); html,body{margin:0;background:${C.bg};} *{box-sizing:border-box;} button{font-family:inherit;}`}</style>
+        <div style={{ width: 220, flexShrink: 0, borderRight: `1px solid ${C.line}`, minHeight: "100vh", position: "sticky", top: 0, alignSelf: "flex-start", display: "flex", flexDirection: "column" }}>
+          <div style={{ padding: "22px 16px 14px" }}>
+            <div style={{ fontWeight: 800, fontSize: 15, letterSpacing: 0.5 }}>ARENA SPIN</div>
+            <div style={{ color: C.oak, fontSize: 11, fontWeight: 700, marginTop: 2 }}>{sessao.name}</div>
+          </div>
+          <nav style={{ display: "flex", flexDirection: "column", marginTop: 4 }}>
+            {abaBtnLarga("geral", "📊 Visão geral")}
+            {abaBtnLarga("cadastros", "👤 Cadastros de alunos")}
+            {abaBtnLarga("clube", "🎟️ Clube Spincycle", clubeAcesso.ver)}
+            {abaBtnLarga("missoes", "🐻 Missões & Arena")}
+            {abaBtnLarga("admins", "🔑 Gestão de admins", adminSuper)}
+          </nav>
+          <div style={{ marginTop: "auto", padding: 16, display: "grid", gap: 8 }}>
+            <button onClick={() => setLarga(false)} style={{ ...btnFantasma(), border: `1px solid ${C.line}`, borderRadius: 8, padding: "8px", fontSize: 11.5 }}>
+              📱 Ver versão mobile
+            </button>
+            <button onClick={sair} style={{ ...btnFantasma(), color: "#E08585", fontSize: 11.5, textAlign: "left", padding: "4px 4px" }}>
+              Sair da conta
+            </button>
+          </div>
+        </div>
+        <div style={{ flex: 1, minWidth: 0, padding: "28px 36px", maxWidth: 1200 }}>
+          {painelAtivo}
+        </div>
+        <Toast msg={msg} />
+      </div>
     );
   }
 
@@ -3238,6 +3392,7 @@ export default function App() {
       pacotes4={pacotes4} alternarPacotes4={alternarPacotes4}
       relampago={relampago} alternarRelampago={alternarRelampago}
       equipe={equipe} alternarEquipe={alternarEquipe} podeMarcarEquipe={adminSuper}
+      gestaoApp={gestaoApp} alternarGestaoApp={alternarGestaoApp}
       adminMissoes={adminSuper || !!adminPerms.liberarMissoes}
       avisar={avisar} renderPost={renderPost}
       irEditar={() => setTela("perfil")}
@@ -3437,7 +3592,7 @@ function TelaEmBreve({ liberar, adminsReg }) {
   };
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", padding: "0 24px", textAlign: "center" }}>
-      <Ic nome="urso" size={64} stroke={1.4} style={{ color: C.oak, marginBottom: 14 }} />
+      <IconeArena size={64} style={{ color: C.oak, marginBottom: 14 }} />
       <div style={{ fontWeight: 800, fontSize: 24, letterSpacing: 1 }}>COMUNIDADE</div>
       <div style={{ fontWeight: 800, fontSize: 24, letterSpacing: 1, color: C.teal }}>SPINCYCLE</div>
       <div style={{ color: C.oak, fontWeight: 800, fontSize: 14, letterSpacing: 3, marginTop: 18 }}>EM BREVE</div>
@@ -3708,7 +3863,7 @@ function TelaClube({ clube, gestor, liberarGestor, irCadastro, sessao, avisar, f
 }
 
 // ---------- Gestão do Clube (terceirizado — só o PIN de gestão entra) ----------
-function CadastroClube({ clube, salvarClube, removerParceiro, lancarCampanha, metricas = { parceiros: {} }, acesso = { ver: true, valores: true, editar: true, campanha: true, pagamentos: true }, voltar }) {
+function CadastroClube({ clube, salvarClube, removerParceiro, lancarCampanha, metricas = { parceiros: {} }, acesso = { ver: true, valores: true, editar: true, campanha: true, pagamentos: true }, semCabecalho, voltar }) {
   const vazio = { id: null, nome: "", categoria: "", endereco: "", site: "", documento: "", unidade: "", beneficio: "", codigo: "", plus: false, logo: null, mensalidade: "", cobrancaLink: "", pagoAte: "", acoes: [] };
   const hoje = todayStr();
   const [form, setForm] = useState(null); // null = lista; objeto = editando/criando
@@ -3733,7 +3888,7 @@ function CadastroClube({ clube, salvarClube, removerParceiro, lancarCampanha, me
 
   return (
     <>
-      <CabecalhoTela titulo="GESTÃO DO CLUBE" sub="Espaço da gestão terceirizada: cadastro, cobrança e vigência dos parceiros. Cada parceiro recebe um código de acesso para gerenciar os próprios vouchers (tela de login → 🏪 Acesso parceiro). Parceiro com mensalidade vencida sai da vitrine automaticamente." voltar={voltar} />
+      {!semCabecalho && <CabecalhoTela titulo="GESTÃO DO CLUBE" sub="Espaço da gestão terceirizada: cadastro, cobrança e vigência dos parceiros. Cada parceiro recebe um código de acesso para gerenciar os próprios vouchers (tela de login → 🏪 Acesso parceiro). Parceiro com mensalidade vencida sai da vitrine automaticamente." voltar={voltar} />}
       {!form ? (
         <>
           <button style={{ ...btnPrimario(), marginBottom: 12 }} onClick={() => setForm({ ...vazio })}>+ NOVO PARCEIRO</button>
@@ -4065,7 +4220,7 @@ function TelaInstantes({ instantes, minhaChave, admin, postar, apagar, renderPos
 }
 
 // ---------- Página pública do aluno (estilo perfil de rede social) ----------
-function TelaPerfilAluno({ track, sid, allData, perfis, fotos, muralVisivel, feedRadar, ehMeu, torcida, torcer, minhaChave, recados, deixarRecado, apagarRecado, admin, giro175, alternarGiro175, pacotes4, alternarPacotes4, relampago, alternarRelampago, equipe, alternarEquipe, podeMarcarEquipe, adminMissoes, avisar, irEditar, renderPost, voltar }) {
+function TelaPerfilAluno({ track, sid, allData, perfis, fotos, muralVisivel, feedRadar, ehMeu, torcida, torcer, minhaChave, recados, deixarRecado, apagarRecado, admin, giro175, alternarGiro175, pacotes4, alternarPacotes4, relampago, alternarRelampago, equipe, alternarEquipe, gestaoApp, alternarGestaoApp, podeMarcarEquipe, adminMissoes, avisar, irEditar, renderPost, voltar }) {
   const [novoRec, setNovoRec] = useState("");
   const chave = `${track}:${sid}`;
   const trilha = TRACKS.find((t) => t.id === track);
@@ -4108,7 +4263,7 @@ function TelaPerfilAluno({ track, sid, allData, perfis, fotos, muralVisivel, fee
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <span style={{ fontWeight: 800, fontSize: 20, letterSpacing: 0.5, textTransform: "uppercase", lineHeight: 1.15 }}>
-              {aluno.name}{equipe && equipe[chave] && <span title="Equipe Spincycle" style={{ marginLeft: 6, fontSize: 15 }}>🛡️</span>}
+              {aluno.name}{gestaoApp && gestaoApp[chave] && <span title="Gestão do App" style={{ marginLeft: 6, fontSize: 15, color: C.teal }}>✓</span>}
             </span>
             {ehMeu ? (
               <button onClick={irEditar} style={{
@@ -4270,6 +4425,26 @@ function TelaPerfilAluno({ track, sid, allData, perfis, fotos, muralVisivel, fee
         </Painel>
       )}
 
+      {/* ✓ Gestão do App — selo verificado exclusivo, aparece junto ao nome (posts e topo do perfil) */}
+      {podeMarcarEquipe && alternarGestaoApp && (
+        <Painel onClick={() => alternarGestaoApp(chave)} style={{
+          display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10,
+          border: `1px solid ${(gestaoApp && gestaoApp[chave]) ? C.teal + "88" : C.line}`,
+        }}>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 13 }}>✓ Gestão do App</div>
+            <div style={{ color: C.mut, fontSize: 11, marginTop: 2, lineHeight: 1.4 }}>
+              Selo verificado ao lado do nome — exclusivo de quem administra o app de verdade.
+            </div>
+          </div>
+          <span style={{
+            fontSize: 11.5, fontWeight: 800, whiteSpace: "nowrap", marginLeft: 10,
+            color: (gestaoApp && gestaoApp[chave]) ? C.teal : C.mut, border: `1px solid ${(gestaoApp && gestaoApp[chave]) ? C.teal : C.line}`,
+            borderRadius: 8, padding: "4px 8px",
+          }}>{(gestaoApp && gestaoApp[chave]) ? "✅ Concedido" : "◻️ Conceder"}</span>
+        </Painel>
+      )}
+
       {/* Últimas: o que falaram dele + o que ele escreveu */}
       <div style={{ color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 1, margin: "18px 0 8px" }}>💬 ÚLTIMAS D{aluno.name.trim().toLowerCase().endsWith("a") ? "A" : "O"} {firstName(aluno.name).toUpperCase()}</div>
       <div style={{ display: "grid", gap: 4 }}>
@@ -4328,7 +4503,7 @@ function BarraGraf({ rotulo, valor, max, sufixo = "", cor }) {
   );
 }
 
-function TelaPainelAdm({ metricas, clube, fotos, allData, muralAlunos, reacts, comentarios, abrirPerfilAluno, profundo, presenca = {}, irAdmins, voltar }) {
+function TelaPainelAdm({ metricas, clube, fotos, allData, muralAlunos, reacts, comentarios, abrirPerfilAluno, profundo, presenca = {}, irAdmins, semCabecalho, voltar }) {
   const [ordem, setOrdem] = useState("recentes"); // recentes | az | ativos
   const [verTodosAlunos, setVerTodosAlunos] = useState(false);
   const dia = 86400000;
@@ -4385,9 +4560,9 @@ function TelaPainelAdm({ metricas, clube, fotos, allData, muralAlunos, reacts, c
 
   return (
     <>
-      <CabecalhoTela titulo={`PAINEL · ${UNIDADE_NOME.toUpperCase()}`}
+      {!semCabecalho && <CabecalhoTela titulo={`PAINEL · ${UNIDADE_NOME.toUpperCase()}`}
         sub="Visão da administração desta unidade — cada Spincycle terá o seu painel, separado. Números aproximados, atualizados a cada ~2 minutos de uso."
-        voltar={voltar} />
+        voltar={voltar} />}
 
       {profundo && (() => {
         const online = Object.values(presenca).filter((ts) => Date.now() - ts < 3 * 60000).length;
@@ -4539,7 +4714,108 @@ function TelaPainelAdm({ metricas, clube, fotos, allData, muralAlunos, reacts, c
 }
 
 // ---------- Central de cadastros e permissões (só a dona do app) ----------
-function TelaGestaoAdmins({ adminsReg, salvarAdmins, allData, fotos, avisar, voltar }) {
+function PainelCadastrosAlunos({ allData, fotos, salvarCadastroAluno, avisar, semCabecalho, voltar }) {
+  const [q, setQ] = useState("");
+  const [editando, setEditando] = useState(null); // { track, id, name, phone, genero, pass, approved }
+  const rows = [];
+  TRACKS.forEach((t) => {
+    const d = allData[t.id];
+    if (d) (d.students || []).forEach((s) => rows.push({ t, s }));
+  });
+  rows.sort((a, b) => norm(a.s.name).localeCompare(norm(b.s.name)));
+  const qNorm = norm(q);
+  const qNum = q.replace(/\D/g, "");
+  const filtrados = qNorm
+    ? rows.filter(({ s }) => norm(s.name).includes(qNorm) || (qNum.length >= 2 && normPhone(s.phone || "").includes(qNum)))
+    : rows;
+  const semGenero = rows.filter(({ s }) => s.genero !== "M" && s.genero !== "F").length;
+
+  const abrirEdicao = ({ t, s }) => setEditando({
+    track: t.id, id: s.id, name: s.name, phone: s.phone ? normPhone(s.phone) : "",
+    genero: s.genero === "M" || s.genero === "F" ? s.genero : "", pass: "", approved: s.approved !== false,
+  });
+
+  const salvar = async () => {
+    if (!editando) return;
+    const nome = editando.name.trim();
+    if (!nome) { avisar && avisar("Digite um nome."); return; }
+    const patch = { name: nome, approved: editando.approved };
+    if (editando.phone.trim()) patch.phone = normPhone(editando.phone);
+    if (editando.genero === "M" || editando.genero === "F") patch.genero = editando.genero;
+    if (editando.pass.trim()) patch.pass = editando.pass.trim();
+    const ok = await salvarCadastroAluno(editando.track, editando.id, patch);
+    if (ok) setEditando(null);
+  };
+
+  return (
+    <>
+      {!semCabecalho && <CabecalhoTela titulo="CADASTROS DE ALUNOS" sub="Todos os alunos dos 3 desafios, num lugar só." voltar={voltar} />}
+      <div style={{ color: C.mut, fontSize: 12, marginBottom: 10 }}>
+        {rows.length} aluno{rows.length === 1 ? "" : "s"} no total
+        {semGenero > 0 && <span style={{ color: C.oak }}> · {semGenero} sem gênero</span>}
+      </div>
+      <input style={{ ...inputStyle(), marginBottom: 10 }} placeholder="Buscar por nome ou telefone…" value={q} onChange={(e) => setQ(e.target.value)} />
+
+      {editando && (
+        <Painel style={{ display: "grid", gap: 8, marginBottom: 14, border: `1px solid ${C.teal}88` }}>
+          <div style={{ color: C.oak, fontWeight: 800, fontSize: 12.5 }}>✏️ Editando cadastro</div>
+          <input style={inputStyle()} placeholder="Nome" value={editando.name} onChange={(e) => setEditando({ ...editando, name: e.target.value })} />
+          <div style={{ display: "flex", gap: 8 }}>
+            <input style={{ ...inputStyle(), flex: 1 }} placeholder="WhatsApp" value={editando.phone}
+              onChange={(e) => setEditando({ ...editando, phone: e.target.value.replace(/\D/g, "").slice(0, 11) })} />
+            <input style={{ ...inputStyle(), flex: 1 }} placeholder="Nova senha (opcional)" value={editando.pass}
+              onChange={(e) => setEditando({ ...editando, pass: e.target.value })} />
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            {[["F", "Feminino"], ["M", "Masculino"]].map(([v, rot]) => (
+              <button key={v} onClick={() => setEditando({ ...editando, genero: v })} style={{
+                flex: 1, background: editando.genero === v ? C.teal : C.panelSoft,
+                color: editando.genero === v ? "#F2F2F2" : C.cream,
+                border: `1px solid ${editando.genero === v ? C.teal : C.line}`,
+                borderRadius: 10, padding: "8px 0", fontWeight: 800, cursor: "pointer", fontSize: 12, fontFamily: "inherit",
+              }}>{rot}</button>
+            ))}
+          </div>
+          <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12.5, cursor: "pointer" }}>
+            <input type="checkbox" checked={editando.approved} onChange={(e) => setEditando({ ...editando, approved: e.target.checked })} />
+            Cadastro aprovado (aparece liberado no Desafio)
+          </label>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button style={{ ...btnFantasma(), flex: 1, color: C.mut }} onClick={() => setEditando(null)}>Cancelar</button>
+            <button style={{ ...btnPrimario(), flex: 2 }} onClick={salvar}>SALVAR</button>
+          </div>
+        </Painel>
+      )}
+
+      <div style={{ display: "grid", gap: 6 }}>
+        {filtrados.slice(0, 200).map(({ t, s }) => (
+          <Painel key={`${t.id}-${s.id}`} onClick={() => abrirEdicao({ t, s })} style={{
+            display: "flex", alignItems: "center", gap: 10, cursor: "pointer", padding: "10px 12px",
+          }}>
+            <Avatar foto={fotos[`${t.id}:${s.id}`]} nome={s.name} size={32} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
+                {s.name}
+                {s.approved === false && <span style={{ color: C.amberSoft, fontSize: 10 }}>⏳ pendente</span>}
+                {(s.genero !== "M" && s.genero !== "F") && <span style={{ color: C.oak, fontSize: 10 }}>⚧ sem gênero</span>}
+              </div>
+              <div style={{ color: C.mut, fontSize: 11 }}>{t.label}{s.phone ? ` · ${fmtPhone(s.phone)}` : ""}</div>
+            </div>
+            <span style={{ color: C.tealSoft, fontSize: 11, fontWeight: 800, flexShrink: 0 }}>EDITAR ›</span>
+          </Painel>
+        ))}
+        {filtrados.length === 0 && (
+          <Painel><div style={{ color: C.mut, fontSize: 13, textAlign: "center" }}>Nenhum cadastro encontrado.</div></Painel>
+        )}
+        {filtrados.length > 200 && (
+          <div style={{ color: C.mut, fontSize: 11, textAlign: "center", marginTop: 4 }}>Mostrando os primeiros 200 — refine a busca pra achar mais rápido.</div>
+        )}
+      </div>
+    </>
+  );
+}
+
+function TelaGestaoAdmins({ adminsReg, salvarAdmins, allData, fotos, avisar, semCabecalho, voltar }) {
   const vazio = { id: null, nome: "", usuario: "", pin: "", unidade: "prudente", papel: "aluno", permissoes: {} };
   const [form, setForm] = useState(vazio);
   const [confirmar, setConfirmar] = useState(null);
@@ -4577,9 +4853,9 @@ function TelaGestaoAdmins({ adminsReg, salvarAdmins, allData, fotos, avisar, vol
   const nPerms = Object.values(form.permissoes || {}).filter(Boolean).length;
   return (
     <>
-      <CabecalhoTela titulo="TODOS OS CADASTROS"
+      {!semCabecalho && <CabecalhoTela titulo="TODOS OS CADASTROS"
         sub="Só você (dona do app) vê esta central. Promova qualquer pessoa, use um papel pronto e ajuste permissão por permissão."
-        voltar={voltar} />
+        voltar={voltar} />}
 
       {/* Promover um aluno existente */}
       <Painel style={{ display: "grid", gap: 8, marginBottom: 14 }}>
