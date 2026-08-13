@@ -3208,6 +3208,7 @@ export default function App() {
       ? rows.filter(({ s }) => norm(s.name).includes(qTxt) || (qNum.length >= 2 && normPhone(s.phone || "").includes(qNum)))
       : rows;
     const semZap = rows.filter(({ s }) => !s.phone).length;
+    const semGenero = rows.filter(({ s }) => s.genero !== "M" && s.genero !== "F").length;
     return (
       <div className="min-h-screen" style={{ ...pageVars, background: pageBg, fontFamily: "'Montserrat', sans-serif", transition: "background .4s" }}>
         {fonts}{modal}
@@ -3222,7 +3223,24 @@ export default function App() {
           <div style={{ color: C.mut, fontSize: 12, marginBottom: 10 }}>
             {rows.length} aluno{rows.length === 1 ? "" : "s"} nos 3 desafios, em ordem alfabética
             {semZap > 0 && <span style={{ color: C.oak }}> · {semZap} sem WhatsApp</span>}
+            {semGenero > 0 && <span style={{ color: C.oak }}> · {semGenero} sem gênero</span>}
           </div>
+          {semGenero > 0 && (
+            <button
+              onClick={() => {
+                TRACKS.forEach((t) => {
+                  mutateTrack(t.id, (d) => {
+                    d.students.forEach((s) => { if (s.genero !== "M" && s.genero !== "F") s.genero = "F"; });
+                  });
+                });
+                avisar(`✓ ${semGenero} cadastro(s) sem gênero foram marcados como Feminino. Os próximos cadastros já vêm com o campo preenchido.`);
+              }}
+              className="w-full rounded-lg px-4 py-2.5 mb-3"
+              style={{ background: "transparent", border: `1px dashed ${C.amber}88`, color: C.amberSoft, fontSize: 12.5, fontWeight: 700 }}
+            >
+              🚻 Preencher {semGenero} cadastro(s) sem gênero como Feminino
+            </button>
+          )}
           {/* Cadastrar aluno direto por aqui */}
           {!novoCad ? (
             <button

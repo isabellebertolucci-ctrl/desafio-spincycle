@@ -381,6 +381,7 @@ const K = {
   pacotes4: `spincycle-comunidade-v1-${UNIDADE}-pacotes4`,
   relampago: `spincycle-comunidade-v1-${UNIDADE}-relampago`,
   indicacoes: `spincycle-comunidade-v1-${UNIDADE}-indicacoes`,
+  equipe: `spincycle-comunidade-v1-${UNIDADE}-equipe`,
 };
 
 // Regras do programa "Indicar um Amigo" — ticket dourado a cada indicação confirmada.
@@ -766,12 +767,8 @@ function gerarEventos(allData, gdata) {
     d.students.forEach((s) => {
       if (s.approved === false) return;
       const nome = firstName(s.name);
-      const genero = s.genero === "M" || s.genero === "F" ? s.genero : null;
+      const genero = s.genero === "M" || s.genero === "F" ? s.genero : "F"; // legado sem gênero definido = Feminino, por decisão da Raquel (cadastros novos já vêm com o campo preenchido)
       const recsOk = (s.records || []).filter((r) => r.status === "ok");
-
-      // Sem gênero cadastrado: aluno não entra no Radar (mensagens dinâmicas
-      // exigem M/F). Combinado com Raquel — evita mensagem no gênero errado.
-      if (!genero) return;
 
       // ---------- 1) Madrugada (Nª vez) ----------
       const madrugas = recsOk.filter((r) => r.slot === "06:15").sort((a, b) => (a.reg || 0) - (b.reg || 0));
@@ -1843,6 +1840,7 @@ export default function App() {
   const [indicacoes, setIndicacoes] = useState({});     // { chaveIndicador: [{id, ts, nome, telefone}] }
   const [giro175, setGiro175] = useState({});          // { chaveAluno: { ts, por } } — concedido manualmente pelo admin
   const [pacotes4, setPacotes4] = useState({});         // { chaveAluno: { ts, por } } — venda de 4 pacotes de 10, idem
+  const [equipe, setEquipe] = useState({});             // { chaveAluno: { ts, por } } — marcado como Equipe Spincycle pelo admin
   const [relampago, setRelampago] = useState({});       // { chaveAluno: { ts, por } } — ganhou Missão Relâmpago, idem
   const [agenda, setAgenda] = useState({ eventos: [] });
   const [lembretes, setLembretes] = useState([]);
@@ -1867,7 +1865,7 @@ export default function App() {
 
   const carregarLeves = async () => {
     if (demoRef.current) return;
-    const [il, pc, ps, gg, ma, rc, pf, ag, cb, cf, bs, mt, adr, prs, tc, cm, it, rd, g175, p4, relp, ind] = await Promise.all([
+    const [il, pc, ps, gg, ma, rc, pf, ag, cb, cf, bs, mt, adr, prs, tc, cm, it, rd, g175, p4, relp, ind, eq] = await Promise.all([
       lerShared(KEY_DESAFIO("ilimitado"), { students: [] }),
       lerShared(KEY_DESAFIO("pacote"), { students: [] }),
       lerShared(KEY_DESAFIO("passe"), { students: [] }),
@@ -1890,6 +1888,7 @@ export default function App() {
       lerShared(K.pacotes4, {}),
       lerShared(K.relampago, {}),
       lerShared(K.indicacoes, {}),
+      lerShared(K.equipe, {}),
     ]);
     if (il !== undefined || pc !== undefined || ps !== undefined) {
       setAllData({
@@ -1914,6 +1913,7 @@ export default function App() {
     if (it !== undefined) setInstantes(Array.isArray(it) ? it : []);
     if (rd !== undefined) setRecados(rd || {});
     if (ind !== undefined) setIndicacoes(ind || {});
+    if (eq !== undefined) setEquipe(eq || {});
     if (g175 !== undefined) setGiro175(g175 || {});
     if (p4 !== undefined) setPacotes4(p4 || {});
     if (relp !== undefined) setRelampago(relp || {});
@@ -2334,6 +2334,25 @@ export default function App() {
     } catch { avisar("⚠️ Falha ao reagir."); }
   };
 
+  // 🚻 Gênero: campo do Desafio (não da Comunidade), mas o próprio aluno pode
+  // ajustar por aqui — segue o MESMO padrão seguro (leitura fresca + -bak) das
+  // demais escritas, mesa se a chave é do Desafio (KEY_DESAFIO), não da Comunidade.
+  const salvarMeuGenero = async (genero) => {
+    if (!sessao || sessao.staff || (genero !== "M" && genero !== "F")) return;
+    const key = KEY_DESAFIO(sessao.track);
+    const base = await lerShared(key, { students: [] });
+    if (base === undefined) { avisar("⚠️ Sem conexão — o gênero não foi salvo."); return; }
+    const novo = JSON.parse(JSON.stringify(base || { students: [] }));
+    const s = (novo.students || []).find((x) => x.id === sessao.sid);
+    if (!s) { avisar("⚠️ Não encontrei seu cadastro no Desafio."); return; }
+    s.genero = genero;
+    try {
+      await gravarShared(key, novo);
+      setAllData((prev) => ({ ...prev, [sessao.track]: novo }));
+      avisar("✅ Gênero atualizado.");
+    } catch { avisar("⚠️ Falha ao salvar — tenta de novo."); }
+  };
+
   const salvarPerfil = async (dados) => {
     if (!sessao) return;
     if (demo) {
@@ -2643,6 +2662,26 @@ export default function App() {
     } catch { avisar("⚠️ Falha ao salvar."); }
   };
 
+  // 🛡️ Equipe Spincycle: tarja de admin no perfil público, concedida manualmente
+  // (mesmo princípio do Giro 175/4 Pacotes — não é um dado que vem do Desafio).
+  const alternarEquipe = async (alvoChave) => {
+    const aplicar = (base) => {
+      const novo = { ...(base || {}) };
+      if (novo[alvoChave]) delete novo[alvoChave];
+      else novo[alvoChave] = { ts: Date.now(), por: sessao?.name || "admin" };
+      return novo;
+    };
+    if (demo) { setEquipe(aplicar(equipe)); return; }
+    const base = await lerShared(K.equipe, {});
+    if (base === undefined) { avisar("⚠️ Sem conexão."); return; }
+    const novo = aplicar(base);
+    try {
+      await gravarShared(K.equipe, novo);
+      setEquipe(novo);
+      avisar(novo[alvoChave] ? "🛡️ Marcado como Equipe Spincycle!" : "Tarja de Equipe Spincycle removida.");
+    } catch { avisar("⚠️ Falha ao salvar."); }
+  };
+
   // 🥚 Missão Relâmpago: easter egg pra quem ganhou — sem lista de vencedores
   // no app ainda, então também é concessão manual, mesmo padrão dos outros dois.
   const alternarRelampago = async (alvoChave) => {
@@ -2835,9 +2874,9 @@ export default function App() {
         }}>
           <span />
           <span style={{
-            textAlign: "center", color: C.oak, fontWeight: 800, fontSize: 12, letterSpacing: 0.6,
+            textAlign: "center", color: C.oak, fontWeight: 700, fontSize: 12, letterSpacing: 0.3,
             overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-          }}>Você está na Arena Spin</span>
+          }}>Você está na <b style={{ fontWeight: 800 }}>Arena Spin</b>.</span>
           <button onClick={() => setMenuAberto(true)} aria-label="Abrir menu" style={{
             width: 38, height: 38, borderRadius: 10, background: C.panelSoft, border: `1px solid ${C.line}`,
             cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
@@ -3156,6 +3195,7 @@ export default function App() {
       giro175={giro175} alternarGiro175={alternarGiro175}
       pacotes4={pacotes4} alternarPacotes4={alternarPacotes4}
       relampago={relampago} alternarRelampago={alternarRelampago}
+      equipe={equipe} alternarEquipe={alternarEquipe} podeMarcarEquipe={adminSuper}
       adminMissoes={adminSuper || !!adminPerms.liberarMissoes}
       avisar={avisar} renderPost={renderPost}
       irEditar={() => setTela("perfil")}
@@ -3222,6 +3262,7 @@ export default function App() {
       sessao={sessao} aluno={meuAluno} perfil={meuPerfil} foto={minhaFoto}
       salvarPerfil={salvarPerfil} sair={sair} admin={admin}
       tema={tema} mudarTema={mudarTema}
+      salvarGenero={salvarMeuGenero}
       irFotos={() => setTela("fotosAlunos")}
       voltar={() => setTela("inicio")}
     />
@@ -3275,19 +3316,19 @@ export default function App() {
               <button onClick={() => setMenuAberto(false)} style={{ background: "transparent", border: "none", color: C.mut, fontSize: 20, cursor: "pointer" }}>✕</button>
             </div>
             {[
-              { icone: "👤", rot: "Meu perfil", onClick: () => { if (sessao && sessao.staff) setTela("painel"); else if (sessao) abrirPerfilAluno(sessao.track, sessao.sid); } },
-              { icone: "📊", rot: "Meu ranking", onClick: () => setTela("ranking") },
-              { icone: "🏆", rot: "Meus desafios", onClick: () => setTela("arena") },
-              { icone: "🎖️", rot: "Minhas conquistas", onClick: () => { if (sessao && sessao.staff) setTela("painel"); else if (sessao) abrirPerfilAluno(sessao.track, sessao.sid); } },
-              { icone: "🎟️", rot: "Meu clube favorito", onClick: () => setTela("favoritos") },
-              { icone: "🎁", rot: "Indicar um amigo", onClick: () => setTela("indicarAmigo") },
+              { rot: "Editar meu perfil", onClick: () => setTela("perfil") },
+              { rot: "Meu ranking", onClick: () => setTela("ranking") },
+              { rot: "Meus desafios", onClick: () => setTela("arena") },
+              { rot: "Minhas conquistas", onClick: () => { if (sessao && sessao.staff) setTela("painel"); else if (sessao) abrirPerfilAluno(sessao.track, sessao.sid); } },
+              { rot: "Meu clube favorito", onClick: () => setTela("favoritos") },
+              { rot: "Indicar um amigo", onClick: () => setTela("indicarAmigo") },
             ].map((item) => (
               <button key={item.rot} onClick={() => { setMenuAberto(false); item.onClick(); }} style={{
                 display: "flex", alignItems: "center", gap: 12, background: "transparent", border: "none",
                 padding: "13px 4px", cursor: "pointer", color: C.cream, fontSize: 14, fontWeight: 700,
                 borderBottom: `1px solid ${C.line}`, textAlign: "left", fontFamily: "inherit",
               }}>
-                <span style={{ fontSize: 17 }}>{item.icone}</span>{item.rot}
+                {item.rot}
               </button>
             ))}
             <button onClick={() => { setMenuAberto(false); sair(); }} style={{
@@ -3295,7 +3336,7 @@ export default function App() {
               padding: "13px 4px", cursor: "pointer", color: "#E08585", fontSize: 14, fontWeight: 700,
               marginTop: 8, fontFamily: "inherit", textAlign: "left",
             }}>
-              <span style={{ fontSize: 17 }}>🚪</span>Sair da conta
+              Sair da conta
             </button>
           </div>
         </div>
@@ -3982,7 +4023,7 @@ function TelaInstantes({ instantes, minhaChave, admin, postar, apagar, renderPos
 }
 
 // ---------- Página pública do aluno (estilo perfil de rede social) ----------
-function TelaPerfilAluno({ track, sid, allData, perfis, fotos, muralVisivel, feedRadar, ehMeu, torcida, torcer, minhaChave, recados, deixarRecado, apagarRecado, admin, giro175, alternarGiro175, pacotes4, alternarPacotes4, relampago, alternarRelampago, adminMissoes, avisar, irEditar, renderPost, voltar }) {
+function TelaPerfilAluno({ track, sid, allData, perfis, fotos, muralVisivel, feedRadar, ehMeu, torcida, torcer, minhaChave, recados, deixarRecado, apagarRecado, admin, giro175, alternarGiro175, pacotes4, alternarPacotes4, relampago, alternarRelampago, equipe, alternarEquipe, podeMarcarEquipe, adminMissoes, avisar, irEditar, renderPost, voltar }) {
   const [novoRec, setNovoRec] = useState("");
   const chave = `${track}:${sid}`;
   const trilha = TRACKS.find((t) => t.id === track);
@@ -4042,6 +4083,13 @@ function TelaPerfilAluno({ track, sid, allData, perfis, fotos, muralVisivel, fee
               }}>{euTorco ? "📣 TORCENDO ✓" : "📣 TORCER"}</button>
             )}
           </div>
+          {equipe && equipe[chave] && (
+            <div style={{
+              display: "inline-flex", alignItems: "center", gap: 4, marginTop: 6,
+              background: `${C.oak}22`, border: `1px solid ${C.oak}66`, borderRadius: 6,
+              padding: "2px 8px", color: C.oak, fontSize: 10.5, fontWeight: 800, letterSpacing: 0.4,
+            }}>🛡️ EQUIPE SPINCYCLE</div>
+          )}
           {perfil.bio && <div style={{ color: C.mut, fontSize: 13.5, marginTop: 6, lineHeight: 1.4 }}>{perfil.bio}</div>}
         </div>
       </div>
@@ -4157,6 +4205,26 @@ function TelaPerfilAluno({ track, sid, allData, perfis, fotos, muralVisivel, fee
             color: temGiro175 ? C.ok : C.mut, border: `1px solid ${temGiro175 ? C.ok : C.line}`,
             borderRadius: 8, padding: "4px 8px",
           }}>{temGiro175 ? "✅ Concedido" : "◻️ Conceder"}</span>
+        </Painel>
+      )}
+
+      {/* 🛡️ Equipe Spincycle — tarja de admin no perfil, concedida na mão pela administração (só super-admin) */}
+      {podeMarcarEquipe && alternarEquipe && (
+        <Painel onClick={() => alternarEquipe(chave)} style={{
+          display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10,
+          border: `1px solid ${(equipe && equipe[chave]) ? C.oak + "88" : C.line}`,
+        }}>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 13 }}>🛡️ Equipe Spincycle</div>
+            <div style={{ color: C.mut, fontSize: 11, marginTop: 2, lineHeight: 1.4 }}>
+              Mostra a tarja de equipe abaixo do nome, no perfil público.
+            </div>
+          </div>
+          <span style={{
+            fontSize: 11.5, fontWeight: 800, whiteSpace: "nowrap", marginLeft: 10,
+            color: (equipe && equipe[chave]) ? C.oak : C.mut, border: `1px solid ${(equipe && equipe[chave]) ? C.oak : C.line}`,
+            borderRadius: 8, padding: "4px 8px",
+          }}>{(equipe && equipe[chave]) ? "✅ Marcado" : "◻️ Marcar"}</span>
         </Painel>
       )}
 
@@ -5064,9 +5132,10 @@ function TelaIndicarAmigo({ minhasIndicacoes = [], indicarAmigo, avisar, voltar 
   );
 }
 
-function TelaPerfil({ sessao, aluno, perfil, foto, salvarPerfil, sair, admin, tema, mudarTema, irFotos, voltar }) {
+function TelaPerfil({ sessao, aluno, perfil, foto, salvarPerfil, sair, admin, tema, mudarTema, salvarGenero, irFotos, voltar }) {
   const [bio, setBio] = useState(perfil.bio || "");
   const [editandoBio, setEditandoBio] = useState(false);
+  const generoAtual = aluno && (aluno.genero === "M" || aluno.genero === "F") ? aluno.genero : "F"; // legado sem valor = Feminino
   const [extra, setExtra] = useState({
     sapatilha: perfil.sapatilha || "", camiseta: perfil.camiseta || "",
     cpf: perfil.cpf || "", endereco: perfil.endereco || "",
@@ -5077,7 +5146,7 @@ function TelaPerfil({ sessao, aluno, perfil, foto, salvarPerfil, sair, admin, te
 
   return (
     <>
-      <CabecalhoTela titulo="MEU PERFIL" voltar={voltar} />
+      <CabecalhoTela titulo="EDITAR MEU PERFIL" voltar={voltar} />
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, marginBottom: 20 }}>
         <Avatar foto={foto} nome={sessao.name} size={110} />
         <div style={{ fontWeight: 800, fontSize: 18, textTransform: "uppercase", letterSpacing: 0.5 }}>{sessao.name}</div>
@@ -5112,6 +5181,21 @@ function TelaPerfil({ sessao, aluno, perfil, foto, salvarPerfil, sair, admin, te
         <div style={{ color: C.mut, fontSize: 11.5, lineHeight: 1.5 }}>
           Nome, senha e WhatsApp são os mesmos do app do Desafio — alterações por lá (ou com a recepção) valem para os dois apps.
         </div>
+        {aluno && salvarGenero && !sessao.staff && (
+          <div style={{ marginTop: 4 }}>
+            <div style={{ fontSize: 13, color: C.mut, marginBottom: 6 }}>Gênero <span style={{ fontSize: 10.5 }}>(usado nas mensagens da Comunidade)</span></div>
+            <div style={{ display: "flex", gap: 6 }}>
+              {[["F", "Feminino"], ["M", "Masculino"]].map(([v, rot]) => (
+                <button key={v} onClick={() => salvarGenero(v)} style={{
+                  flex: 1, background: generoAtual === v ? C.teal : C.panelSoft,
+                  color: generoAtual === v ? "#F2F2F2" : C.cream,
+                  border: `1px solid ${generoAtual === v ? C.teal : C.line}`,
+                  borderRadius: 10, padding: "9px 0", fontWeight: 800, cursor: "pointer", fontSize: 12.5, fontFamily: "inherit",
+                }}>{rot}</button>
+              ))}
+            </div>
+          </div>
+        )}
       </Painel>
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "20px 0 8px" }}>
