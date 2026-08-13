@@ -124,22 +124,81 @@ const FRASES_PRONTAS = [
   "Contando as horas pra 6h15 de amanhã. (mentira) (ou não)",
 ];
 
-// Símbolo do carimbo de cada missão — futuras conquistas de outros jogos entram aqui
-const EMOJI_MISSAO = {
-  dobra: "✌️", madruga: "🌅", maratona: "🚴", semana: "📆", zona: "🔄",
-  fds: "🌞", giro: "🕐", fogo: "🔥", amigo: "🤝",
-  cartela: "⭐", linha: "🏆",
+// ============================================================
+// CATÁLOGO DE SELOS — o selo é conquistado dentro de cada desafio
+// (Desafio das Missões, e futuramente Rota do Urso e outros jogos),
+// mas só vira vitrine visual aqui na Arena/Comunidade. Pra somar um
+// desafio novo: adiciona uma chave nova abaixo (mesmo formato) — o
+// resto do app (passaporte, perfil, toast) já funciona sem mexer em nada.
+// ============================================================
+// Índices do tabuleiro 3x3 (mesma ordem do MISSION_BASE): cantos = 0,2,6,8
+const CANTOS_IDX = [0, 2, 6, 8];
+
+const CATALOGO_SELOS = {
+  missoes: {
+    rotulo: "Desafio das Missões",
+    selos: {
+      dobra:    { nome: "Dobradinha",         svg: "dobradinha" },
+      madruga:  { nome: "Madrugador",         svg: "madrugador" },
+      maratona: { nome: "Maratonista",        svg: "maratonista" },
+      semana:   { nome: "Semana Perfeita",    svg: "semana_perfeita" },
+      zona:     { nome: "Troca a Base",       svg: "troca_a_base" },
+      fds:      { nome: "Fim de Semana Raiz", svg: "fim_de_semana_raiz" },
+      giro:     { nome: "Giro na Grade",      svg: "giro_na_grade" },
+      fogo:     { nome: "Sequência de Fogo",  svg: "sequencia_de_fogo" },
+      amigo:    { nome: "Chama a Galera",     svg: "chama_a_galera" },
+      linha_h:  { nome: "Linha Horizontal",   svg: "linha_da_cartela" },
+      linha_v:  { nome: "Linha Vertical",     svg: "linha_vertical" },
+      linha_d:  { nome: "Linha Transversal",  svg: "linha_transversal" },
+      cantos:   { nome: "Quatro Cantos",      svg: "quatro_cantos" },
+      cartela:  { nome: "Cartela Cheia",      svg: "cartela_cheia" },
+      giro175:  { nome: "Giro 175",           svg: "giro_175" },
+      pacotes4: { nome: "4 Pacotes de 10",    svg: "ingresso" },
+      relampago:{ nome: "Missão Relâmpago",   svg: "ovo_surpresa" },
+    },
+  },
+  // Próximo desafio entra assim, com seu próprio conjunto de selos:
+  // rota_urso: { rotulo: "Rota do Urso", selos: { ... } },
 };
 
-function calcularCarimbos(prog) {
+// concedidos: { giro175: {chave:true}, pacotes4: {chave:true} } — selos que não vêm
+// de `prog`, concedidos manualmente pelo admin (ver alternarGiro175 / alternarPacotes4)
+function calcularCarimbos(prog, desafioId = "missoes", concedidos = {}, chaveAluno = "") {
   const lista = [];
   if (!prog) return lista;
+  const cat = CATALOGO_SELOS[desafioId];
+  if (!cat) return lista;
+  const S = cat.selos;
   MISSION_BASE.forEach((m, i) => {
-    if (prog.done[i]) lista.push({ id: `st-${m.id}`, emoji: EMOJI_MISSAO[m.id] || "🎖️", nome: m.name, detalhe: "missão cumprida no Desafio das Missões" });
+    if (prog.done[i] && S[m.id]) lista.push({ id: `${desafioId}-${m.id}`, svg: S[m.id].svg, nome: S[m.id].nome, detalhe: `missão cumprida no ${cat.rotulo}` });
   });
-  if (prog.linesDone.length > 0) lista.push({ id: "st-linha", emoji: EMOJI_MISSAO.linha, nome: `${prog.linesDone.length} linha${prog.linesDone.length > 1 ? "s" : ""} da cartela`, detalhe: "fechada(s) no Desafio das Missões" });
-  if (prog.full) lista.push({ id: "st-cheia", emoji: EMOJI_MISSAO.cartela, nome: "CARTELA CHEIA", detalhe: "as 9 missões do Desafio das Missões" });
+  // linhas: uma vez por direção (0-2 horizontal, 3-5 vertical, 6-7 transversal/diagonal)
+  const temH = prog.linesDone.some((i) => i < 3), temV = prog.linesDone.some((i) => i >= 3 && i < 6), temD = prog.linesDone.some((i) => i >= 6);
+  if (temH && S.linha_h) lista.push({ id: `${desafioId}-linha-h`, svg: S.linha_h.svg, nome: S.linha_h.nome, detalhe: `linha horizontal fechada no ${cat.rotulo}` });
+  if (temV && S.linha_v) lista.push({ id: `${desafioId}-linha-v`, svg: S.linha_v.svg, nome: S.linha_v.nome, detalhe: `linha vertical fechada no ${cat.rotulo}` });
+  if (temD && S.linha_d) lista.push({ id: `${desafioId}-linha-d`, svg: S.linha_d.svg, nome: S.linha_d.nome, detalhe: `linha transversal fechada no ${cat.rotulo}` });
+  // quatro cantos
+  if (CANTOS_IDX.every((i) => prog.done[i]) && S.cantos) lista.push({ id: `${desafioId}-cantos`, svg: S.cantos.svg, nome: S.cantos.nome, detalhe: `os quatro cantos da cartela no ${cat.rotulo}` });
+  if (prog.full && S.cartela) lista.push({ id: `${desafioId}-cheia`, svg: S.cartela.svg, nome: "Cartela Cheia", detalhe: `as 9 missões do ${cat.rotulo}` });
+  // 4 Pacotes de 10 aulas: venda não tem dado no app, concedido manualmente pelo admin
+  if ((concedidos.pacotes4 || {})[chaveAluno] && S.pacotes4) lista.push({ id: `${desafioId}-pacotes4`, svg: S.pacotes4.svg, nome: S.pacotes4.nome, detalhe: "4 pacotes de 10 aulas vendidos, confirmado pela administração" });
+  // Missão Relâmpago: easter egg pra quem ganhou — concedido manualmente (sem dado de vencedor no app ainda)
+  if ((concedidos.relampago || {})[chaveAluno] && S.relampago) lista.push({ id: `${desafioId}-relampago`, svg: S.relampago.svg, nome: S.relampago.nome, detalhe: "venceu uma Missão Relâmpago — o ovo de páscoa da temporada 🥚" });
+  // Giro 175: concedido manualmente (cartela cheia + 8 amigos no Ilimitados + 4 pacotes de 10 vendidos)
+  if ((concedidos.giro175 || {})[chaveAluno] && S.giro175) lista.push({ id: `${desafioId}-giro175`, svg: S.giro175.svg, nome: "Giro 175", detalhe: "cartela cheia, 8 amigos e 4 pacotes de 10 aulas — o combo raiz" });
   return lista;
+}
+
+// Um selo real (asset do Kittl), giro sutil e cor conforme o tema atual.
+function SeloCarimbo({ carimbo, sid, avisar }) {
+  const rot = (hash32(carimbo.id + sid) % 10) - 5; // giro sutil, mantém o carimbo legível
+  const cor = C.cream; // preto no tema claro, quase-branco no tema escuro — acompanha o app
+  return (
+    <button title={carimbo.nome} onClick={() => avisar && avisar(`${carimbo.nome} — ${carimbo.detalhe}`)} style={{
+      width: 84, height: 84, background: "transparent", border: "none", cursor: "pointer", padding: 0,
+      transform: `rotate(${rot}deg)`, flexShrink: 0,
+    }} dangerouslySetInnerHTML={{ __html: seloSvgHtml(carimbo.svg, cor) }} />
+  );
 }
 
 function CarimbosPassaporte({ carimbos, sid, avisar }) {
@@ -147,34 +206,24 @@ function CarimbosPassaporte({ carimbos, sid, avisar }) {
   if (!carimbos.length) return null;
   return (
     <>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 9, alignItems: "center" }}>
-        {(todos ? carimbos : carimbos.slice(0, 6)).map((e) => (
-          <button key={e.id} title={e.nome} onClick={() => avisar && avisar(`${e.emoji} ${e.nome} — ${e.detalhe}`)} style={{
-            width: 62, height: 62, borderRadius: "50%",
-            background: "transparent", cursor: "pointer", padding: 0,
-            border: `1.6px dashed ${C.oak}99`,
-            boxShadow: `inset 0 0 0 3px transparent, inset 0 0 0 4.5px ${C.oak}33`,
-            display: "flex", alignItems: "center", justifyContent: "center",
-            transform: `rotate(${(hash32(e.id + sid) % 25) - 12}deg)`,
-            opacity: 0.92,
-          }}>
-            <span style={{ fontSize: 24, filter: "saturate(.85)" }}>{e.emoji}</span>
-          </button>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "flex-start" }}>
+        {(todos ? carimbos : carimbos.slice(0, 8)).map((e) => (
+          <SeloCarimbo key={e.id} carimbo={e} sid={sid} avisar={avisar} />
         ))}
-        {carimbos.length > 6 && !todos && (
+        {carimbos.length > 8 && !todos && (
           <button onClick={() => setTodos(true)} style={{
-            background: "transparent", border: "none", cursor: "pointer",
+            background: "transparent", border: "none", cursor: "pointer", alignSelf: "center",
             color: C.tealSoft, fontWeight: 800, fontSize: 12.5, padding: "0 4px",
-          }}>+{carimbos.length - 6} ›</button>
+          }}>+{carimbos.length - 8} ›</button>
         )}
-        {todos && carimbos.length > 6 && (
+        {todos && carimbos.length > 8 && (
           <button onClick={() => setTodos(false)} style={{
-            background: "transparent", border: "none", cursor: "pointer",
+            background: "transparent", border: "none", cursor: "pointer", alignSelf: "center",
             color: C.mut, fontWeight: 700, fontSize: 12, padding: "0 4px",
           }}>‹ menos</button>
         )}
       </div>
-      <div style={{ color: C.mut, fontSize: 10.5, marginTop: 6 }}>Toque num carimbo pra ver a conquista.</div>
+      <div style={{ color: C.mut, fontSize: 10.5, marginTop: 8 }}>Toque num carimbo pra ver a conquista.</div>
     </>
   );
 }
@@ -307,6 +356,9 @@ const K = {
   comentarios: `spincycle-comunidade-v1-${UNIDADE}-comentarios`,
   instantes: `spincycle-comunidade-v1-${UNIDADE}-instantes`,
   recados: `spincycle-comunidade-v1-${UNIDADE}-recados`,
+  giro175: `spincycle-comunidade-v1-${UNIDADE}-giro175`,
+  pacotes4: `spincycle-comunidade-v1-${UNIDADE}-pacotes4`,
+  relampago: `spincycle-comunidade-v1-${UNIDADE}-relampago`,
 };
 
 // ⚡ Instantes: mensagens curtinhas que somem sozinhas (estilo Notas do Instagram)
@@ -346,16 +398,9 @@ async function gravarLocal(key, obj) {
 
 // ---------- Arena: catálogo de desafios e jogos ----------
 // status: "andamento" | "breve" | "encerrado"
-// 🏟️ A ESTANTE DA ARENA — contrato de dados (ver ARQUITETURA-ARENA.md)
-// Cada desafio guarda-se nas próprias gavetas; a Comunidade só lê o padrão.
-const K_ARENA = {
-  catalogo: `spincycle-arena-${UNIDADE}-catalogo`,
-  gaveta: (desafioId, g) => `spincycle-arena-${UNIDADE}-${desafioId}-${g}`,
-};
-
 const DESAFIOS_PADRAO = [
   {
-    id: "missoes-2026a", nome: "DESAFIO DAS MISSÕES", status: "andamento", legado: true,
+    id: "missoes", nome: "DESAFIO DAS MISSÕES", status: "andamento",
     periodo: "05/AGO A 20/SET", icone: "urso",
     resumo: "Cartela de 9 missões estilo bingo. Feche linhas, vire Madrugador, traga convidados e dispute o ranking.",
     url: DESAFIO_URL, cta: "ENTRAR NO DESAFIO",
@@ -887,6 +932,328 @@ const ICONE = {
     <path key="m" d="M12 15.9v.9M12 16.8c-.4.55-1.15.6-1.7.2M12 16.8c.4.55 1.15.6 1.7.2" strokeWidth="1.2" />,
   ],
 };
+
+// ============================================================
+// SELOS — assets vetoriais reais (Kittl), estilo carimbo vintage.
+// SELO_DEFS_HTML fica escondido e é renderizado 1x no topo do app;
+// cada selo individual (abaixo) referencia essa textura/símbolos
+// compartilhados via url(#...) e <use>, sem duplicar peso.
+// ============================================================
+const SELO_DEFS_HTML = `<svg aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden">
+<defs><!-- Pequenas falhas transparentes para simular tinta de carimbo. -->
+    <mask id="distress-mask" maskUnits="userSpaceOnUse" x="-225" y="-225" width="450" height="450">
+      <rect x="-225" y="-225" width="450" height="450" fill="#fff"/>
+      <g fill="#000" opacity=".82">
+        <circle cx="-118" cy="-93" r="2.4"/><circle cx="-82" cy="-124" r="1.5"/>
+        <circle cx="-28" cy="-137" r="2.2"/><circle cx="24" cy="-128" r="1.4"/>
+        <circle cx="92" cy="-103" r="2.7"/><circle cx="131" cy="-56" r="1.8"/>
+        <circle cx="143" cy="8" r="2.3"/><circle cx="121" cy="71" r="1.6"/>
+        <circle cx="83" cy="121" r="2.8"/><circle cx="18" cy="139" r="1.6"/>
+        <circle cx="-45" cy="132" r="2.5"/><circle cx="-104" cy="107" r="1.7"/>
+        <circle cx="-139" cy="51" r="2.4"/><circle cx="-143" cy="-16" r="1.7"/>
+        <circle cx="-88" cy="-37" r="1.7"/><circle cx="-47" cy="-68" r="2.2"/>
+        <circle cx="1" cy="-82" r="1.4"/><circle cx="57" cy="-57" r="2.5"/>
+        <circle cx="91" cy="-11" r="1.8"/><circle cx="82" cy="49" r="2.7"/>
+        <circle cx="38" cy="83" r="1.9"/><circle cx="-12" cy="71" r="2.1"/>
+        <circle cx="-64" cy="78" r="1.5"/><circle cx="-91" cy="29" r="2.6"/>
+        <circle cx="-61" cy="4" r="1.3"/><circle cx="-18" cy="-25" r="2.1"/>
+        <circle cx="34" cy="-13" r="1.8"/><circle cx="49" cy="31" r="2.4"/>
+      </g>
+      <g stroke="#000" stroke-linecap="round" opacity=".68">
+        <path d="M-151-72l16 4m222-78l14 5m-8 282l17-6M-147 96l14-3" stroke-width="2.2"/>
+        <path d="M-74-103l10 3m109-2l12-3M-5 112l16 2M-124 12l11-2" stroke-width="1.6"/>
+        <path d="M-68 43l18-4m80 13l15 4M-12-50l13-3m97 35l12 2" stroke-width="2"/>
+      </g>
+    </mask>
+
+    <filter id="rough-edge" x="-8%" y="-8%" width="116%" height="116%" color-interpolation-filters="sRGB">
+      <feTurbulence type="fractalNoise" baseFrequency="0.018 0.09" numOctaves="2" seed="27" result="noise"/>
+      <feDisplacementMap in="SourceGraphic" in2="noise" scale="1.15" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+
+    <polygon id="tiny-star" points="0,-8 2.35,-2.5 8,-2.5 3.7,1.2 5.2,7 0,3.8 -5.2,7 -3.7,1.2 -8,-2.5 -2.35,-2.5"/>
+
+    <g id="wheel" class="icon-line">
+      <circle r="49"/><circle r="5" class="icon-fill"/>
+      <path d="M0-49V49M-49 0H49M-34.65-34.65l69.3 69.3M34.65-34.65l-69.3 69.3
+               M-18.75-45.25l37.5 90.5M18.75-45.25l-37.5 90.5
+               M-45.25-18.75l90.5 37.5M-45.25 18.75l90.5-37.5" stroke-width="2.1"/>
+    </g></defs>
+<style>
+.badge { fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; }
+    .ink-red, .ink-blue, .ink-black { color: #111111; }
+    .stamp-body { mask: url(#distress-mask); filter: url(#rough-edge); }
+    .outer-ring { stroke-width: 5.4; stroke-dasharray: 470 8 42 5 125 7; }
+    .echo-ring { stroke-width: 1.8; stroke-dasharray: 46 4 118 3 75 5; }
+    .inner-ring { stroke-width: 2.2; stroke-dasharray: 3 5; }
+    .contour-classic .outer-ring { stroke-width: 5.4; stroke-dasharray: 470 8 42 5 125 7; opacity: .96; }
+    .contour-classic .echo-ring { stroke-width: 1.8; stroke-dasharray: 46 4 118 3 75 5; opacity: .9; }
+    .contour-worn .outer-ring { stroke-width: 6.4; stroke-dasharray: 79 17 5 12 127 22 3 15 58 10; opacity: .8; }
+    .contour-worn .echo-ring { stroke-width: 2.3; stroke-dasharray: 18 8 4 12 49 7 2 10; opacity: .65; }
+    .contour-worn > .stamp-body > circle.inner-ring { stroke-dasharray: 1 10 2 15; opacity: .62; }
+    .contour-double-dash .outer-ring { stroke-width: 4.7; stroke-dasharray: 20 11; opacity: .96; }
+    .contour-double-dash .echo-ring { stroke-width: 3; stroke-dasharray: 8 7; stroke-dashoffset: 4; opacity: .9; }
+    .contour-double-dash > .stamp-body > circle.inner-ring { display: none; }
+    .label {
+      fill: currentColor; stroke: none; font-family: Rockwell, "Roboto Slab", Georgia, serif;
+      font-weight: 800; letter-spacing: 2.8px;
+    }
+    .icon-line { fill: none; stroke: currentColor; stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; }
+    .icon-thin { fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+    .icon-fill { fill: currentColor; stroke: none; }
+    .ornament { fill: currentColor; stroke: none; }
+    .bottom-arc { stroke-width: 2; stroke-dasharray: 2 9; }
+    .label, .bottom-arc, .ornament { display: none; }
+</style>
+</svg>`;
+
+const SELO_SVG = {
+  dobradinha: { vb: 340, svg: `<g id="badge-dobradinha" class="badge contour-classic">
+    <path id="arc-dobradinha" d="M-120 28A124 124 0 0 1 120 28" fill="none" stroke="none"/>
+    <g class="stamp-body">
+      <circle class="outer-ring" r="151"/><circle class="echo-ring" r="143"/><circle class="inner-ring" r="127"/>
+      <text class="label" x="0" y="-79" text-anchor="middle" font-size="25">DOBRADINHA</text>
+      <g transform="translate(-40 0) scale(1.12)"><use href="#wheel" xlink:href="#wheel"/></g>
+      <g transform="translate(40 0) scale(1.12)"><use href="#wheel" xlink:href="#wheel"/></g>
+      <path class="bottom-arc" d="M-88 96Q0 132 88 96"/>
+      <use class="ornament" href="#tiny-star" xlink:href="#tiny-star" transform="translate(-31 113) scale(.72)"/>
+      <use class="ornament" href="#tiny-star" xlink:href="#tiny-star" transform="translate(0 119) scale(.82)"/>
+      <use class="ornament" href="#tiny-star" xlink:href="#tiny-star" transform="translate(31 113) scale(.72)"/>
+    </g>
+  </g>` },
+  madrugador: { vb: 340, svg: `<g id="badge-madrugador" class="badge contour-worn">
+    <path id="arc-madrugador" d="M-120 28A124 124 0 0 1 120 28" fill="none" stroke="none"/>
+    <g class="stamp-body">
+      <circle class="outer-ring" r="151"/><circle class="echo-ring" r="143"/><circle class="inner-ring" r="127"/>
+      <text class="label" x="0" y="-79" text-anchor="middle" font-size="25">MADRUGADOR</text>
+      <path class="icon-fill" transform="translate(0 -9) scale(1.26)" d="M-50 55A50 50 0 0 1 50 55Z"/>
+      <g class="icon-line" transform="translate(0 -9) scale(1.26)">
+        <path d="M-82 56H82"/>
+        <path d="M0-31V-11M-55-12l14 15M55-12L41 3M-82 25l20 6M82 25l-20 6"/>
+      </g>
+      <path class="bottom-arc" d="M-88 94Q0 130 88 94"/>
+      <use class="ornament" href="#tiny-star" xlink:href="#tiny-star" transform="translate(-31 112) scale(.72)"/>
+      <use class="ornament" href="#tiny-star" xlink:href="#tiny-star" transform="translate(0 118) scale(.82)"/>
+      <use class="ornament" href="#tiny-star" xlink:href="#tiny-star" transform="translate(31 112) scale(.72)"/>
+    </g>
+  </g>` },
+  maratonista: { vb: 340, svg: `<g id="badge-maratonista" class="badge contour-double-dash">
+    <path id="arc-maratonista" d="M-120 28A124 124 0 0 1 120 28" fill="none" stroke="none"/>
+    <g class="stamp-body">
+      <circle class="outer-ring" r="151"/><circle class="echo-ring" r="143"/><circle class="inner-ring" r="127"/>
+      <text class="label" x="0" y="-79" text-anchor="middle" font-size="24">MARATONISTA</text>
+      <g transform="translate(0 0) scale(1.72)"><use href="#wheel" xlink:href="#wheel"/></g>
+      <path class="bottom-arc" d="M-88 96Q0 132 88 96"/>
+      <use class="ornament" href="#tiny-star" xlink:href="#tiny-star" transform="translate(-31 113) scale(.72)"/>
+      <use class="ornament" href="#tiny-star" xlink:href="#tiny-star" transform="translate(0 119) scale(.82)"/>
+      <use class="ornament" href="#tiny-star" xlink:href="#tiny-star" transform="translate(31 113) scale(.72)"/>
+    </g>
+  </g>` },
+  semana_perfeita: { vb: 340, svg: `<g id="badge-semana-perfeita" class="badge contour-classic">
+    <path id="arc-semana" d="M-120 28A124 124 0 0 1 120 28" fill="none" stroke="none"/>
+    <g class="stamp-body">
+      <circle class="outer-ring" r="151"/><circle class="echo-ring" r="143"/><circle class="inner-ring" r="127"/>
+      <text class="label" x="0" y="-79" text-anchor="middle" font-size="19">SEMANA PERFEITA</text>
+      <g class="icon-line" transform="translate(-5 0) scale(1.08)" stroke-width="6">
+        <path d="M-102 1l10 12 18-27"/><path d="M-71 1l10 12 18-27"/>
+        <path d="M-40 1l10 12 18-27"/><path d="M-9 1L1 13l18-27"/>
+        <path d="M22 1l10 12 18-27"/><path d="M53 1l10 12 18-27"/>
+        <path d="M84 1l10 12 18-27"/>
+      </g>
+      <path class="bottom-arc" d="M-88 82Q0 121 88 82"/>
+      <use class="ornament" href="#tiny-star" xlink:href="#tiny-star" transform="translate(-31 105) scale(.72)"/>
+      <use class="ornament" href="#tiny-star" xlink:href="#tiny-star" transform="translate(0 112) scale(.82)"/>
+      <use class="ornament" href="#tiny-star" xlink:href="#tiny-star" transform="translate(31 105) scale(.72)"/>
+    </g>
+  </g>` },
+  troca_a_base: { vb: 340, svg: `<g id="badge-troca-a-base" class="badge contour-worn">
+    <path id="arc-troca" d="M-120 28A124 124 0 0 1 120 28" fill="none" stroke="none"/>
+    <g class="stamp-body">
+      <circle class="outer-ring" r="151"/><circle class="echo-ring" r="143"/><circle class="inner-ring" r="127"/>
+      <text class="label" x="0" y="-79" text-anchor="middle" font-size="23">TROCA A BASE</text>
+      <g class="icon-fill" transform="translate(0 -22) scale(1.2)">
+        <path d="M-82-25H43v-22l46 37-46 37V5H-82Z"/>
+        <path d="M82 34H-43v22l-46-37 46-37V4H82Z" transform="translate(0 34)"/>
+      </g>
+      <path class="bottom-arc" d="M-88 96Q0 132 88 96"/>
+      <use class="ornament" href="#tiny-star" xlink:href="#tiny-star" transform="translate(-31 113) scale(.72)"/>
+      <use class="ornament" href="#tiny-star" xlink:href="#tiny-star" transform="translate(0 119) scale(.82)"/>
+      <use class="ornament" href="#tiny-star" xlink:href="#tiny-star" transform="translate(31 113) scale(.72)"/>
+    </g>
+  </g>` },
+  fim_de_semana_raiz: { vb: 340, svg: `<g id="badge-fim-de-semana-raiz" class="badge contour-double-dash">
+    <path id="arc-fim-semana" d="M-120 28A124 124 0 0 1 120 28" fill="none" stroke="none"/>
+    <g class="stamp-body">
+      <circle class="outer-ring" r="151"/><circle class="echo-ring" r="143"/><circle class="inner-ring" r="127"/>
+      <text class="label" x="0" y="-79" text-anchor="middle" font-size="17">FIM DE SEMANA RAIZ</text>
+      <g class="icon-line" transform="translate(0 -5) scale(1.08)">
+        <circle cx="-55" cy="0" r="29"/><circle cx="55" cy="0" r="29"/>
+        <path d="M-55 0l34-39L0 0Zm55 0l30-39 25 39M-21-39h51M-29-45h-23M30-39l10-15h19"/>
+        <circle cx="0" cy="0" r="5" class="icon-fill"/>
+        <path d="M-82 48q20-15 41 0t41 0 41 0 41 0"/>
+        <path d="M-82 67q20-15 41 0t41 0 41 0 41 0"/>
+        <path d="M-82 86q20-15 41 0t41 0 41 0 41 0"/>
+      </g>
+      <path class="bottom-arc" d="M-87 98Q0 129 87 98"/>
+      <use class="ornament" href="#tiny-star" xlink:href="#tiny-star" transform="translate(-18 113) scale(.7)"/>
+      <use class="ornament" href="#tiny-star" xlink:href="#tiny-star" transform="translate(18 113) scale(.7)"/>
+    </g>
+  </g>` },
+  giro_na_grade: { vb: 340, svg: `<g id="badge-giro-na-grade" class="badge contour-classic">
+    <path id="arc-giro" d="M-120 28A124 124 0 0 1 120 28" fill="none" stroke="none"/>
+    <g class="stamp-body">
+      <circle class="outer-ring" r="151"/><circle class="echo-ring" r="143"/><circle class="inner-ring" r="127"/>
+      <text class="label" x="0" y="-79" text-anchor="middle" font-size="21">GIRO NA GRADE</text>
+      <g class="icon-line" transform="translate(0 0) scale(1.4)">
+        <circle r="62"/>
+        <path d="M0-52v10M0 42v10M-52 0h10M42 0h10" stroke-width="3"/>
+        <path d="M0 0V-34M0 0l31 24" stroke-width="6"/>
+        <circle r="6" class="icon-fill"/>
+      </g>
+      <path class="bottom-arc" d="M-88 96Q0 132 88 96"/>
+      <use class="ornament" href="#tiny-star" xlink:href="#tiny-star" transform="translate(-31 113) scale(.72)"/>
+      <use class="ornament" href="#tiny-star" xlink:href="#tiny-star" transform="translate(0 119) scale(.82)"/>
+      <use class="ornament" href="#tiny-star" xlink:href="#tiny-star" transform="translate(31 113) scale(.72)"/>
+    </g>
+  </g>` },
+  sequencia_de_fogo: { vb: 340, svg: `<g id="badge-sequencia-de-fogo" class="badge contour-worn">
+    <path id="arc-fogo" d="M-120 28A124 124 0 0 1 120 28" fill="none" stroke="none"/>
+    <g class="stamp-body">
+      <circle class="outer-ring" r="151"/><circle class="echo-ring" r="143"/><circle class="inner-ring" r="127"/>
+      <text class="label" x="0" y="-79" text-anchor="middle" font-size="17">SEQUÊNCIA DE FOGO</text>
+      <path class="icon-fill" transform="translate(0 -5) scale(1.18)" d="M2-67c4 28-8 38-17 52-7-20-22-29-22-29 5 28-34 43-22 83 9 31 34 51 61 51 36 0 67-27 67-64 0-31-17-58-45-80 2 21-3 33-10 43C12-32 2-67 2-67Zm-4 126c-15 0-27-12-27-28 0-12 8-22 18-34 0 13 7 18 12 25 7-10 13-19 14-32 14 12 22 26 22 41 0 16-12 28-27 28Z"/>
+      <path class="bottom-arc" d="M-88 100Q0 132 88 100"/>
+      <use class="ornament" href="#tiny-star" xlink:href="#tiny-star" transform="translate(-30 115) scale(.7)"/>
+      <use class="ornament" href="#tiny-star" xlink:href="#tiny-star" transform="translate(30 115) scale(.7)"/>
+    </g>
+  </g>` },
+  chama_a_galera: { vb: 340, svg: `<g id="badge-chama-a-galera" class="badge contour-double-dash">
+    <path id="arc-galera" d="M-120 28A124 124 0 0 1 120 28" fill="none" stroke="none"/>
+    <g class="stamp-body">
+      <circle class="outer-ring" r="151"/><circle class="echo-ring" r="143"/><circle class="inner-ring" r="127"/>
+      <text class="label" x="0" y="-79" text-anchor="middle" font-size="20">CHAMA A GALERA</text>
+      <g class="icon-fill" transform="translate(0 -10) scale(1.17)">
+        <circle cx="-38" cy="-18" r="25"/><circle cx="38" cy="-18" r="25"/>
+        <path d="M-91 68c0-38 22-63 53-63S15 30 15 68Z"/>
+        <path d="M-15 68c0-38 22-63 53-63S91 30 91 68Z"/>
+      </g>
+      <path class="bottom-arc" d="M-88 96Q0 132 88 96"/>
+      <use class="ornament" href="#tiny-star" xlink:href="#tiny-star" transform="translate(-31 113) scale(.72)"/>
+      <use class="ornament" href="#tiny-star" xlink:href="#tiny-star" transform="translate(0 119) scale(.82)"/>
+      <use class="ornament" href="#tiny-star" xlink:href="#tiny-star" transform="translate(31 113) scale(.72)"/>
+    </g>
+  </g>` },
+  linha_da_cartela: { vb: 340, svg: `<g id="badge-linha-da-cartela" class="badge contour-worn">
+    <path id="arc-linha" d="M-120 28A124 124 0 0 1 120 28" fill="none" stroke="none"/>
+    <g class="stamp-body">
+      <circle class="outer-ring" r="151"/><circle class="echo-ring" r="143"/><circle class="inner-ring" r="127"/>
+      <text class="label" x="0" y="-79" text-anchor="middle" font-size="18">LINHA DA CARTELA</text>
+      <g class="icon-line" transform="translate(0 0) scale(1.27)">
+        <rect x="-88" y="-31" width="50" height="58"/><path d="M-82-24l38 44M-44-24l-38 44"/>
+        <rect x="-25" y="-31" width="50" height="58"/><path d="M-19-24l38 44M19-24l-38 44"/>
+        <rect x="38" y="-31" width="50" height="58"/><path d="M44-24l38 44M82-24L44 20"/>
+      </g>
+      <path class="bottom-arc" d="M-88 88Q0 126 88 88"/>
+      <use class="ornament" href="#tiny-star" xlink:href="#tiny-star" transform="translate(-31 108) scale(.72)"/>
+      <use class="ornament" href="#tiny-star" xlink:href="#tiny-star" transform="translate(0 115) scale(.82)"/>
+      <use class="ornament" href="#tiny-star" xlink:href="#tiny-star" transform="translate(31 108) scale(.72)"/>
+    </g>
+  </g>` },
+  quatro_cantos: { vb: 340, svg: `<g id="badge-quatro-cantos" class="badge contour-classic">
+    <g class="stamp-body">
+      <circle class="outer-ring" r="151"/><circle class="echo-ring" r="143"/><circle class="inner-ring" r="127"/>
+      <g class="icon-line" stroke-width="10">
+        <path d="M-31-88H-88v57M31-88h57v57M-88 31v57h57M88 31v57H31"/>
+      </g>
+    </g>
+  </g>` },
+  linha_vertical: { vb: 340, svg: `<g id="badge-linha-vertical" class="badge contour-double-dash">
+    <g class="stamp-body">
+      <circle class="outer-ring" r="151"/><circle class="echo-ring" r="143"/><circle class="inner-ring" r="127"/>
+      <g class="icon-line" transform="scale(1.27)">
+        <rect x="-25" y="-88" width="50" height="50"/><path d="M-19-82l38 38M19-82l-38 38"/>
+        <rect x="-25" y="-25" width="50" height="50"/><path d="M-19-19l38 38M19-19l-38 38"/>
+        <rect x="-25" y="38" width="50" height="50"/><path d="M-19 44l38 38M19 44l-38 38"/>
+      </g>
+    </g>
+  </g>` },
+  linha_transversal: { vb: 340, svg: `<g id="badge-linha-transversal" class="badge contour-double-dash">
+    <g class="stamp-body">
+      <circle class="outer-ring" r="151"/><circle class="echo-ring" r="143"/><circle class="inner-ring" r="127"/>
+      <g class="icon-line" transform="scale(1.2)">
+        <rect x="-82" y="31" width="50" height="50"/><path d="M-76 37l38 38M-38 37l-38 38"/>
+        <rect x="-25" y="-25" width="50" height="50"/><path d="M-19-19l38 38M19-19l-38 38"/>
+        <rect x="32" y="-81" width="50" height="50"/><path d="M38-75l38 38M76-75L38-37"/>
+      </g>
+    </g>
+  </g>` },
+  cartela_cheia: { vb: 420, svg: `<g id="badge-cartela-cheia" class="badge contour-classic">
+    <path id="arc-cheia" d="M-143 35A148 148 0 0 1 143 35" fill="none" stroke="none"/>
+    <g class="stamp-body">
+      <circle class="outer-ring" r="184" stroke-width="7"/>
+      <circle class="echo-ring" r="174"/><circle class="inner-ring" r="154"/>
+      <text class="label" x="0" y="-109" text-anchor="middle" font-size="27">CARTELA CHEIA</text>
+      <circle cx="0" cy="0" r="106" stroke-width="5"/>
+      <circle cx="0" cy="0" r="92" class="inner-ring"/>
+      <path class="icon-fill" d="M0-38l18 42 46 4-35 30 11 45L0 59l-40 24 11-45-35-30 46-4Z" transform="translate(0 -7) scale(1.16)"/>
+      <path class="icon-fill" d="M-68 104l-8 105 39-30 28 42 15-106Z"/>
+      <path class="icon-fill" d="M68 104l8 105-39-30-28 42-15-106Z"/>
+      <path class="icon-thin" d="M-120 116Q0 164 120 116"/>
+      <use class="ornament" href="#tiny-star" xlink:href="#tiny-star" transform="translate(-134 72) scale(1.05)"/>
+      <use class="ornament" href="#tiny-star" xlink:href="#tiny-star" transform="translate(134 72) scale(1.05)"/>
+    </g>
+  </g>` },
+  giro_175: { vb: 420, svg: `<g id="badge-giro-175" class="badge contour-worn">
+    <g class="stamp-body">
+      <circle class="outer-ring" r="184" stroke-width="7"/>
+      <circle class="echo-ring" r="174"/><circle class="inner-ring" r="154"/>
+      <use class="icon-fill" href="#tiny-star" xlink:href="#tiny-star" transform="translate(-95 -92) scale(1.7)"/>
+      <use class="icon-fill" href="#tiny-star" xlink:href="#tiny-star" transform="translate(95 -92) scale(1.7)"/>
+      <use class="icon-fill" href="#tiny-star" xlink:href="#tiny-star" transform="translate(-112 65) scale(1.7)"/>
+      <use class="icon-fill" href="#tiny-star" xlink:href="#tiny-star" transform="translate(112 65) scale(1.7)"/>
+      <circle cx="0" cy="0" r="106" stroke-width="5"/>
+      <circle cx="0" cy="0" r="92" class="inner-ring"/>
+      <text x="0" y="18" text-anchor="middle" font-family="Rockwell, &quot;Roboto Slab&quot;, Georgia, serif" font-weight="800" font-size="78" class="icon-fill">175</text>
+      <path class="icon-line" stroke-width="6" fill="none" d="M-58 62h24l9-19 13 34 11-23 8 8h27"/>
+      <path class="icon-line" d="M-68 104l-8 105 39-30 28 42 15-106Z"/>
+      <path class="icon-line" d="M68 104l8 105-39-30-28 42-15-106Z"/>
+      <path class="icon-thin" d="M-120 116Q0 164 120 116"/>
+    </g>
+  </g>` },
+  ingresso: { vb: 340, svg: `<g id="badge-ingresso" class="badge contour-classic">
+    <g class="stamp-body">
+      <circle class="outer-ring" r="151"/><circle class="echo-ring" r="143"/><circle class="inner-ring" r="127"/>
+      <g class="icon-line" transform="rotate(-10) scale(1.12)" stroke-width="5">
+        <path d="M-91-50H91v29c-15 0-15 24 0 24v47H-91V21c15 0 15-24 0-24Z"/>
+        <path d="M-48-50V50M48-50V50" stroke-width="3" stroke-dasharray="4 9"/>
+        <path class="icon-fill" stroke="none" d="M0-25l7 17 19 2-14 12 4 19L0 15l-16 10 4-19-14-12 19-2Z"/>
+        <path d="M-76-34h15M-76 34h15M61-34h15M61 34h15" stroke-width="3"/>
+      </g>
+    </g>
+  </g>` },
+  ovo_surpresa: { vb: 340, svg: `<g id="badge-ovo-surpresa" class="badge contour-double-dash">
+    <g class="stamp-body">
+      <circle class="outer-ring" r="151"/><circle class="echo-ring" r="143"/><circle class="inner-ring" r="127"/>
+      <g class="icon-line" stroke-width="5">
+        <path d="M0-104C-53-96-78-37-75 20c3 58 32 94 75 94s72-36 75-94C78-37 53-96 0-104Z"/>
+        <path d="M-58-56q14-15 28 0t28 0 28 0 28 0"/>
+        <path d="M-68-24l18 17 18-17 18 17 18-17L22-7l18-17L58-7"/>
+        <path d="M-73 18Q0 42 73 18M-72 48Q0 26 72 48"/>
+        <circle class="icon-fill" cx="-43" cy="34" r="6"/><circle class="icon-fill" cx="-14" cy="39" r="6"/>
+        <circle class="icon-fill" cx="15" cy="39" r="6"/><circle class="icon-fill" cx="44" cy="34" r="6"/>
+        <path d="M-58 72q14-15 28 0t28 0 28 0 28 0"/>
+      </g>
+    </g>
+  </g>` },
+};
+// Um selo isolado: monta o svg pronto (com a cor certa pro tema atual) via dangerouslySetInnerHTML,
+// porque o asset vem direto do Kittl (marcações como xlink:href não existem em JSX puro).
+function seloSvgHtml(chaveSvg, cor) {
+  const s = SELO_SVG[chaveSvg];
+  if (!s) return "";
+  const vbAttr = s.viewBox || `-${s.vb / 2} -${s.vb / 2} ${s.vb} ${s.vb}`;
+  return `<svg viewBox="${vbAttr}" width="100%" height="100%" style="color:${cor}">${s.svg}</svg>`;
+}
 function Ic({ nome, size = 24, stroke = 1.8, style }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -1134,15 +1501,6 @@ function TelaLogin({ allData, carregando, onEntrar, entrarDemo, onParceiro, admi
             onKeyDown={(e) => { if (e.key === "Enter") tentar(); }} />
           {erro && <div style={{ color: "#E08585", fontSize: 12.5 }}>{erro}</div>}
           <button style={btnPrimario()} onClick={tentar}>ENTRAR</button>
-          {adminLiberado && (
-            <button onClick={entrarStaff} style={{
-              ...btnFantasma(), width: "100%",
-              border: `1px solid ${C.oak}77`, borderRadius: 10, padding: "12px",
-              color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 0.5,
-            }}>
-              🔑 ENTRAR NA ADMINISTRAÇÃO (sem perfil de aluno)
-            </button>
-          )}
           <a href={DESAFIO_URL} target="_blank" rel="noreferrer" style={{ ...btnFantasma(), textAlign: "center", textDecoration: "none" }}>
             Ainda não tem cadastro? Cadastre-se no app do Desafio →
           </a>
@@ -1180,7 +1538,7 @@ function TelaLogin({ allData, carregando, onEntrar, entrarDemo, onParceiro, admi
 }
 
 // ---------- Novo Post (aba do Mural) ----------
-function NovoPost({ publicar, podeOficial }) {
+function NovoPost({ publicar, admin }) {
   const [texto, setTexto] = useState("");
   const [foto, setFoto] = useState(null);
   const [comoOficial, setComoOficial] = useState(false);
@@ -1188,13 +1546,13 @@ function NovoPost({ publicar, podeOficial }) {
   return (
     <div style={{ display: "grid", gap: 10 }}>
       <div style={{ color: C.mut, fontSize: 12.5, lineHeight: 1.5 }}>
-        {(podeOficial || FOTOS_NO_MURAL) ? "Frase, foto, ou os dois. Todo mundo da comunidade vê. 🐻" : "Solta a frase — todo mundo da comunidade vê. 🐻"}
+        {(adminSuper || adminPerms.postarFeed || FOTOS_NO_MURAL) ? "Frase, foto, ou os dois. Todo mundo da comunidade vê. 🐻" : "Solta a frase — todo mundo da comunidade vê. 🐻"}
       </div>
       <textarea style={{ ...inputStyle(), minHeight: 80, resize: "vertical" }} maxLength={280}
         placeholder="Escreve aqui…" value={texto} onChange={(e) => setTexto(e.target.value)} />
       {foto && <img src={foto} alt="" style={{ width: "100%", borderRadius: 10 }} />}
       <div style={{ display: "flex", gap: 8 }}>
-        {(podeOficial || FOTOS_NO_MURAL) && (
+        {(adminSuper || adminPerms.postarFeed || FOTOS_NO_MURAL) && (
           <button style={{ ...btnFantasma(), border: `1px solid ${C.line}`, borderRadius: 10, padding: "10px 14px", flex: 1 }}
             onClick={() => fileRef.current && fileRef.current.click()}>
             📷 {foto ? "Trocar foto" : "Foto"}
@@ -1203,13 +1561,13 @@ function NovoPost({ publicar, podeOficial }) {
         <button style={{ ...btnPrimario(), flex: 2, opacity: texto.trim() || foto ? 1 : 0.5 }}
           onClick={() => {
             if (!texto.trim() && !foto) return;
-            publicar(texto.trim(), foto, podeOficial && comoOficial);
+            publicar(texto.trim(), foto, (adminSuper || adminPerms.postarFeed) && comoOficial);
             setTexto(""); setFoto(null);
           }}>
           PUBLICAR
         </button>
       </div>
-      {podeOficial && (
+      {(adminSuper || adminPerms.postarFeed) && (
         <label style={{ display: "flex", gap: 8, alignItems: "center", color: C.oak, fontSize: 12.5, cursor: "pointer" }}>
           <input type="checkbox" checked={comoOficial} onChange={(e) => setComoOficial(e.target.checked)} />
           📌 Postar como Spincycle Prudente (oficial)
@@ -1254,8 +1612,6 @@ export default function App() {
   const [adminInfo, setAdminInfo] = useState(null); // { usuario, super, perms, unidade }
   const [adminsReg, setAdminsReg] = useState([]);   // admins cadastrados pela dona
   const [presenca, setPresenca] = useState({});     // { chave: ts } — batimento de quem está online
-  const [arenaCat, setArenaCat] = useState(null);   // catálogo da Arena no banco (null = ainda não existe)
-  const [arenaDados, setArenaDados] = useState({}); // { desafioId: { participantes, eventos, conquistas } }
   const metrBuf = useRef({ entradas: 0, min: 0, telas: {}, parceiros: {}, sujo: false });
   const [torcida, setTorcida] = useState({});      // { chaveAlvo: [chaveTorcedor, ...] }
   const [comentarios, setComentarios] = useState({}); // { postId: [{id, ts, texto, autorNome, autorChave}] }
@@ -1268,6 +1624,9 @@ export default function App() {
   const [clubeFoco, setClubeFoco] = useState(null);      // parceiro para abrir já expandido no Clube
   const [instantes, setInstantes] = useState([]);      // [{id, ts, texto, autorNome, autorChave}]
   const [recados, setRecados] = useState({});          // { chaveAlvo: [{id, ts, texto, autorNome, autorChave}] }
+  const [giro175, setGiro175] = useState({});          // { chaveAluno: { ts, por } } — concedido manualmente pelo admin
+  const [pacotes4, setPacotes4] = useState({});         // { chaveAluno: { ts, por } } — venda de 4 pacotes de 10, idem
+  const [relampago, setRelampago] = useState({});       // { chaveAluno: { ts, por } } — ganhou Missão Relâmpago, idem
   const [agenda, setAgenda] = useState({ eventos: [] });
   const [lembretes, setLembretes] = useState([]);
   const [config, setConfig] = useState(CONFIG_PADRAO);
@@ -1291,7 +1650,7 @@ export default function App() {
 
   const carregarLeves = async () => {
     if (demoRef.current) return;
-    const [il, pc, ps, gg, ma, rc, pf, ag, cb, cf, bs, mt, adr, prs, tc, cm, it, rd] = await Promise.all([
+    const [il, pc, ps, gg, ma, rc, pf, ag, cb, cf, bs, mt, adr, prs, tc, cm, it, rd, g175, p4, relp] = await Promise.all([
       lerShared(KEY_DESAFIO("ilimitado"), { students: [] }),
       lerShared(KEY_DESAFIO("pacote"), { students: [] }),
       lerShared(KEY_DESAFIO("passe"), { students: [] }),
@@ -1310,6 +1669,9 @@ export default function App() {
       lerShared(K.comentarios, {}),
       lerShared(K.instantes, []),
       lerShared(K.recados, {}),
+      lerShared(K.giro175, {}),
+      lerShared(K.pacotes4, {}),
+      lerShared(K.relampago, {}),
     ]);
     if (il !== undefined || pc !== undefined || ps !== undefined) {
       setAllData({
@@ -1333,27 +1695,9 @@ export default function App() {
     if (cm !== undefined) setComentarios(cm || {});
     if (it !== undefined) setInstantes(Array.isArray(it) ? it : []);
     if (rd !== undefined) setRecados(rd || {});
-
-    // 🏟️ A estante: catálogo + gavetas de cada desafio cadastrado
-    const cat = await lerShared(K_ARENA.catalogo, null);
-    if (cat !== undefined) {
-      setArenaCat(cat);
-      const lista = ((cat && cat.desafios) || []).filter((d) => !d.legado);
-      const dados = {};
-      await Promise.all(lista.map(async (d) => {
-        const [pt, ev, cq] = await Promise.all([
-          lerShared(K_ARENA.gaveta(d.id, "participantes"), {}),
-          lerShared(K_ARENA.gaveta(d.id, "eventos"), []),
-          lerShared(K_ARENA.gaveta(d.id, "conquistas"), {}),
-        ]);
-        dados[d.id] = {
-          participantes: pt || {},
-          eventos: Array.isArray(ev) ? ev : [],
-          conquistas: cq || {},
-        };
-      }));
-      setArenaDados(dados);
-    }
+    if (g175 !== undefined) setGiro175(g175 || {});
+    if (p4 !== undefined) setPacotes4(p4 || {});
+    if (relp !== undefined) setRelampago(relp || {});
   };
   const carregarFotos = async () => {
     if (demoRef.current) return;
@@ -2018,6 +2362,67 @@ export default function App() {
     try { await gravarShared(K.recados, novo); setRecados(novo); } catch { avisar("⚠️ Falha ao remover."); }
   };
 
+  // 🏅 Giro 175: selo concedido manualmente pelo admin — cartela cheia + 8 amigos
+  // (Ilimitados) + 4 pacotes de 10 aulas vendidos. Venda não tem dado no app,
+  // então quem confirma é a administração, com um toque, igual ao ◻️ Entregue.
+  const alternarGiro175 = async (alvoChave) => {
+    const aplicar = (base) => {
+      const novo = { ...(base || {}) };
+      if (novo[alvoChave]) delete novo[alvoChave];
+      else novo[alvoChave] = { ts: Date.now(), por: sessao?.name || "admin" };
+      return novo;
+    };
+    if (demo) { setGiro175(aplicar(giro175)); return; }
+    const base = await lerShared(K.giro175, {});
+    if (base === undefined) { avisar("⚠️ Sem conexão."); return; }
+    const novo = aplicar(base);
+    try {
+      await gravarShared(K.giro175, novo);
+      setGiro175(novo);
+      avisar(novo[alvoChave] ? "🏅 Giro 175 concedido!" : "Giro 175 revogado.");
+    } catch { avisar("⚠️ Falha ao salvar."); }
+  };
+
+  // 📦 4 Pacotes de 10 aulas: mesmo princípio do Giro 175 — venda não tem dado
+  // no app, então o selo é concedido manualmente pela administração.
+  const alternarPacotes4 = async (alvoChave) => {
+    const aplicar = (base) => {
+      const novo = { ...(base || {}) };
+      if (novo[alvoChave]) delete novo[alvoChave];
+      else novo[alvoChave] = { ts: Date.now(), por: sessao?.name || "admin" };
+      return novo;
+    };
+    if (demo) { setPacotes4(aplicar(pacotes4)); return; }
+    const base = await lerShared(K.pacotes4, {});
+    if (base === undefined) { avisar("⚠️ Sem conexão."); return; }
+    const novo = aplicar(base);
+    try {
+      await gravarShared(K.pacotes4, novo);
+      setPacotes4(novo);
+      avisar(novo[alvoChave] ? "📦 4 Pacotes concedido!" : "4 Pacotes revogado.");
+    } catch { avisar("⚠️ Falha ao salvar."); }
+  };
+
+  // 🥚 Missão Relâmpago: easter egg pra quem ganhou — sem lista de vencedores
+  // no app ainda, então também é concessão manual, mesmo padrão dos outros dois.
+  const alternarRelampago = async (alvoChave) => {
+    const aplicar = (base) => {
+      const novo = { ...(base || {}) };
+      if (novo[alvoChave]) delete novo[alvoChave];
+      else novo[alvoChave] = { ts: Date.now(), por: sessao?.name || "admin" };
+      return novo;
+    };
+    if (demo) { setRelampago(aplicar(relampago)); return; }
+    const base = await lerShared(K.relampago, {});
+    if (base === undefined) { avisar("⚠️ Sem conexão."); return; }
+    const novo = aplicar(base);
+    try {
+      await gravarShared(K.relampago, novo);
+      setRelampago(novo);
+      avisar(novo[alvoChave] ? "🥚 Missão Relâmpago concedida!" : "Missão Relâmpago revogada.");
+    } catch { avisar("⚠️ Falha ao salvar."); }
+  };
+
   const registrarBusca = async (termo) => {
     const t = norm(termo).slice(0, 40);
     if (t.length < 3) return;
@@ -2106,24 +2511,6 @@ export default function App() {
     pagamentos: gestorClube || adminSuper || !!adminPerms.clubePagamentos,
   };
 
-  const prateleirasSemeadas = useRef(false);
-  useEffect(() => {
-    // Cria o catálogo no banco na primeira visita da dona (prateleiras vazias + vitrine atual)
-    const semear = async () => {
-      if (!adminSuper || demo || prateleirasSemeadas.current) return;
-      if (arenaCat !== null) return; // já existe (ou ainda carregando: undefined nunca chega aqui)
-      prateleirasSemeadas.current = true;
-      const inicial = { desafios: DESAFIOS_PADRAO.map((d) => ({ ...d })) };
-      try {
-        await gravarShared(K_ARENA.catalogo, inicial);
-        setArenaCat(inicial);
-        avisar("🏟️ Prateleiras da Arena criadas no banco.");
-      } catch { prateleirasSemeadas.current = false; }
-    };
-    if (!carregando) semear();
-  }, [carregando, adminSuper, arenaCat]);
-
-
   const minhaTorcidaSet = new Set(Object.keys(torcida).filter((alvo) => (torcida[alvo] || []).includes(minhaChave)));
   const nomeDaChave = (chave) => {
     if (!chave) return "";
@@ -2165,21 +2552,7 @@ export default function App() {
 
   const renderPost = (e, extra = {}) => <PostCard key={e.id} {...postProps(e)} {...extra} />;
 
-  const feedRadarLegado = gerarEventos(allData, gdata);
-  const eventosArena = Object.values(arenaDados).flatMap((d) => d.eventos).map((e) => {
-    const [tk, ...r] = (e.chave || "").split(":");
-    return { id: e.id, ts: e.ts, titulo: e.titulo, corpo: e.corpo, track: tk || undefined, sid: r.join(":") || undefined };
-  });
-  const feedRadar = [...feedRadarLegado, ...eventosArena].sort((a, b) => b.ts - a.ts);
-  // Carimbos e participações vindos da estante, por pessoa
-  const carimbosArenaDe = (chave) => Object.values(arenaDados).flatMap((d) => (d.conquistas[chave] || []));
-  const participacoesArenaDe = (chave) => {
-    const cat = (arenaCat && arenaCat.desafios) || [];
-    return cat.filter((d) => !d.legado).map((d) => {
-      const p = ((arenaDados[d.id] || {}).participantes || {})[chave];
-      return p ? { id: d.id, nome: d.nome, placar: p.placar || "", status: d.status, icone: d.icone } : null;
-    }).filter(Boolean);
-  };
+  const feedRadar = gerarEventos(allData, gdata);
   // Vitrine do mural: posts de aluno dentro da janela; oficiais não expiram
   const muralVisivel = muralAlunos.filter((p) => p.tipo === "oficial" || p.tipo === "campanha" || Date.now() - p.ts < JANELA_MURAL_DIAS * dayMs);
   const feedMisto = [...feedRadar, ...muralVisivel].sort((a, b) => b.ts - a.ts);
@@ -2329,7 +2702,7 @@ export default function App() {
         {!recolhidos.arena && <button style={{ ...btnFantasma(), fontSize: 12 }} onClick={() => setTela("arena")}>VER TODOS ›</button>}
       </div>
       {!recolhidos.arena && (() => {
-        const lista = (arenaCat && arenaCat.desafios && arenaCat.desafios.length ? arenaCat.desafios : null) || config.desafios || DESAFIOS_PADRAO;
+        const lista = config.desafios || DESAFIOS_PADRAO;
         const fixado = lista.find((d) => d.status === "andamento") || lista[0];
         if (!fixado) return null;
         return (
@@ -2357,7 +2730,7 @@ export default function App() {
         const trilhaMeu = TRACKS.find((t) => t.id === sessao.track);
         const alunoMeu = (((allData[sessao.track] || {}).students) || []).find((s) => s.id === sessao.sid);
         const progMeu = alunoMeu && trilhaMeu ? computeProgress(alunoMeu, trilhaMeu.targets) : null;
-        const meusCarimbos = [...calcularCarimbos(progMeu), ...(sessao.staff ? [] : carimbosArenaDe(`${sessao.track}:${sessao.sid}`))];
+        const meusCarimbos = calcularCarimbos(progMeu, "missoes", { giro175, pacotes4, relampago }, `${sessao.track}:${sessao.sid}`);
         if (!meusCarimbos.length) return null;
         return (
           <div style={{ marginTop: 14 }}>
@@ -2459,7 +2832,7 @@ export default function App() {
           </div>
         </>
       )}
-      {abaMural === "novo" && <NovoPost publicar={publicarAluno} podeOficial={adminSuper || !!adminPerms.postarFeed} />}
+      {abaMural === "novo" && <NovoPost publicar={publicarAluno} admin={admin} />}
     </>
   );
 
@@ -2517,9 +2890,11 @@ export default function App() {
       ehMeu={sessao && perfilVisto.sid === sessao.sid && perfilVisto.track === sessao.track}
       torcida={torcida} torcer={torcer} minhaChave={minhaChave}
       recados={recados} deixarRecado={deixarRecado} apagarRecado={apagarRecado} admin={adminSuper || !!adminPerms.excluirRecados}
+      giro175={giro175} alternarGiro175={alternarGiro175}
+      pacotes4={pacotes4} alternarPacotes4={alternarPacotes4}
+      relampago={relampago} alternarRelampago={alternarRelampago}
+      adminMissoes={adminSuper || !!adminPerms.liberarMissoes}
       avisar={avisar} renderPost={renderPost}
-      carimbosExtra={carimbosArenaDe(`${perfilVisto.track}:${perfilVisto.sid}`)}
-      arenaParticipacoes={participacoesArenaDe(`${perfilVisto.track}:${perfilVisto.sid}`)}
       irEditar={() => setTela("perfil")}
       voltar={() => setTela("inicio")}
     />
@@ -2527,7 +2902,7 @@ export default function App() {
 
   // ---------- Arena ----------
   const telaArena = (
-    <TelaArena desafios={(arenaCat && arenaCat.desafios && arenaCat.desafios.length ? arenaCat.desafios : null) || config.desafios || DESAFIOS_PADRAO} voltar={() => setTela("inicio")} />
+    <TelaArena desafios={config.desafios || DESAFIOS_PADRAO} voltar={() => setTela("inicio")} />
   );
 
   // ---------- Busca (palavras e pessoas no feed) ----------
@@ -2616,6 +2991,7 @@ export default function App() {
 
   return (
     <>
+      <div dangerouslySetInnerHTML={{ __html: SELO_DEFS_HTML }} />
       {shell(conteudo)}
       {verReacoes && (
         <div onClick={() => setVerReacoes(null)} style={{
@@ -3299,7 +3675,7 @@ function TelaInstantes({ instantes, minhaChave, admin, postar, apagar, renderPos
 }
 
 // ---------- Página pública do aluno (estilo perfil de rede social) ----------
-function TelaPerfilAluno({ track, sid, allData, perfis, fotos, muralVisivel, feedRadar, ehMeu, torcida, torcer, minhaChave, recados, deixarRecado, apagarRecado, admin, avisar, irEditar, renderPost, carimbosExtra = [], arenaParticipacoes = [], voltar }) {
+function TelaPerfilAluno({ track, sid, allData, perfis, fotos, muralVisivel, feedRadar, ehMeu, torcida, torcer, minhaChave, recados, deixarRecado, apagarRecado, admin, giro175, alternarGiro175, pacotes4, alternarPacotes4, relampago, alternarRelampago, adminMissoes, avisar, irEditar, renderPost, voltar }) {
   const [novoRec, setNovoRec] = useState("");
   const chave = `${track}:${sid}`;
   const trilha = TRACKS.find((t) => t.id === track);
@@ -3321,7 +3697,10 @@ function TelaPerfilAluno({ track, sid, allData, perfis, fotos, muralVisivel, fee
   const euTorco = torcedores.includes(minhaChave);
 
   // Carimbos: as missões cumpridas + conquistas especiais
-  const carimbos = [...calcularCarimbos(prog), ...carimbosExtra];
+  const temGiro175 = !!(giro175 && giro175[chave]);
+  const temPacotes4 = !!(pacotes4 && pacotes4[chave]);
+  const temRelampago = !!(relampago && relampago[chave]);
+  const carimbos = calcularCarimbos(prog, "missoes", { giro175: giro175 || {}, pacotes4: pacotes4 || {}, relampago: relampago || {} }, chave);
   // Últimas: o que falaram dele (Radar) + o que ele escreveu, em ordem
   const meusPosts = muralVisivel.filter((p) => p.autorChave === chave);
   const sobreEle = feedRadar.filter((e) => e.sid === sid && e.track === track);
@@ -3398,19 +3777,7 @@ function TelaPerfilAluno({ track, sid, allData, perfis, fotos, muralVisivel, fee
             </div>
             <span style={{ color: C.ok, fontSize: 9, fontWeight: 800, border: `1px solid ${C.ok}66`, borderRadius: 6, padding: "1px 6px", letterSpacing: 0.4 }}>EM ANDAMENTO</span>
           </Painel>
-        ) : null}
-        {arenaParticipacoes.map((d) => (
-          <Painel key={d.id} style={{ textAlign: "center", padding: "16px 8px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 7 }}>
-            <span style={{ fontSize: 26 }}>{/^\p{Emoji}/u.test(d.icone || "") ? d.icone : "🎖️"}</span>
-            <div style={{ fontWeight: 800, fontSize: 10.5, letterSpacing: 0.4, lineHeight: 1.3 }}>{d.nome}</div>
-            {d.placar && <div style={{ color: C.mut, fontSize: 10.5, lineHeight: 1.4 }}>{d.placar}</div>}
-            <span style={{
-              color: d.status === "encerrado" ? C.mut : C.ok, fontSize: 9, fontWeight: 800,
-              border: `1px solid ${d.status === "encerrado" ? C.mut : C.ok}66`, borderRadius: 6, padding: "1px 6px", letterSpacing: 0.4,
-            }}>{d.status === "encerrado" ? "ENCERRADO" : "EM ANDAMENTO"}</span>
-          </Painel>
-        ))}
-        {!(participa && prog) && arenaParticipacoes.length === 0 && (
+        ) : (
           <Painel style={{ textAlign: "center", padding: "16px 8px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, opacity: 0.6 }}>
             <div style={{ color: C.mut, fontSize: 11, lineHeight: 1.4 }}>Ainda fora dos desafios 🚴</div>
           </Painel>
@@ -3423,6 +3790,67 @@ function TelaPerfilAluno({ track, sid, allData, perfis, fotos, muralVisivel, fee
           <div style={{ color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 1, margin: "18px 0 8px" }}>🎖️ CARIMBOS</div>
           <CarimbosPassaporte carimbos={carimbos} sid={sid} avisar={avisar} />
         </>
+      )}
+
+      {/* 4 Pacotes de 10 — admin concede na mão, venda não tem dado no app */}
+      {adminMissoes && (
+        <Painel onClick={() => alternarPacotes4(chave)} style={{
+          display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10,
+          border: `1px solid ${temPacotes4 ? C.ok + "88" : C.line}`,
+        }}>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 13 }}>📦 4 Pacotes de 10 Aulas</div>
+            <div style={{ color: C.mut, fontSize: 11, marginTop: 2, lineHeight: 1.4 }}>
+              Venda confirmada de 4 pacotes de 10 aulas.
+            </div>
+          </div>
+          <span style={{
+            fontSize: 11.5, fontWeight: 800, whiteSpace: "nowrap", marginLeft: 10,
+            color: temPacotes4 ? C.ok : C.mut, border: `1px solid ${temPacotes4 ? C.ok : C.line}`,
+            borderRadius: 8, padding: "4px 8px",
+          }}>{temPacotes4 ? "✅ Concedido" : "◻️ Conceder"}</span>
+        </Painel>
+      )}
+
+      {/* Missão Relâmpago — easter egg, admin concede na mão (sem lista de vencedores no app ainda) */}
+      {adminMissoes && (
+        <Painel onClick={() => alternarRelampago(chave)} style={{
+          display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10,
+          border: `1px solid ${temRelampago ? C.ok + "88" : C.line}`,
+        }}>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 13 }}>🥚 Missão Relâmpago</div>
+            <div style={{ color: C.mut, fontSize: 11, marginTop: 2, lineHeight: 1.4 }}>
+              Ganhou uma Missão Relâmpago — libera o easter egg.
+            </div>
+          </div>
+          <span style={{
+            fontSize: 11.5, fontWeight: 800, whiteSpace: "nowrap", marginLeft: 10,
+            color: temRelampago ? C.ok : C.mut, border: `1px solid ${temRelampago ? C.ok : C.line}`,
+            borderRadius: 8, padding: "4px 8px",
+          }}>{temRelampago ? "✅ Concedido" : "◻️ Conceder"}</span>
+        </Painel>
+      )}
+
+
+      {/* Giro 175 — admin concede na mão, porque venda de pacote não tem dado no app */}
+      {adminMissoes && (
+        <Painel onClick={() => alternarGiro175(chave)} style={{
+          display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10,
+          border: `1px solid ${temGiro175 ? C.ok + "88" : C.line}`,
+        }}>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 13 }}>🏅 Giro 175</div>
+            <div style={{ color: C.mut, fontSize: 11, marginTop: 2, lineHeight: 1.4 }}>
+              Cartela cheia + 8 amigos (Ilimitados) + 4 pacotes de 10 aulas vendidos.
+            </div>
+          </div>
+          <span style={{
+            fontSize: 11.5, fontWeight: 800, whiteSpace: "nowrap", marginLeft: 10,
+            color: temGiro175 ? C.ok : C.mut, border: `1px solid ${temGiro175 ? C.ok : C.line}`,
+            borderRadius: 8, padding: "4px 8px",
+          }}>{temGiro175 ? "✅ Concedido" : "◻️ Conceder"}</span>
+        </Painel>
       )}
 
       {/* Últimas: o que falaram dele + o que ele escreveu */}
