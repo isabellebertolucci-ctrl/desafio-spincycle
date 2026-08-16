@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from "react";
 import { escolherMsgRadar, categoriaInatividade } from "./RADAR_MSGS_400";
-import ursoCabecaImg from "./urso-cabeca.png";
 import ursoLogoDesafioImg from "./urso-logo-desafio.png";
 
 /* ============================================================
@@ -458,6 +457,7 @@ const K_FAVORITOS = "spincycle-comunidade-favoritos-clube";
 const K_RECOLHIDOS = "spincycle-comunidade-recolhidos";
 const K_VISITADOS = "spincycle-comunidade-visitados";
 const K_TERMOS = "spincycle-comunidade-termos-recentes";
+const K_ULTIMA_VISITA_NOTIF = "spincycle-comunidade-ultima-visita-notif"; // por aparelho — marca "lido até aqui"
 const K_MODO_PAINEL = "spincycle-comunidade-modo-painel"; // "web" | "mobile" — só muda quando a pessoa clica
 // 🌐 Registro central das unidades da rede — SEM prefixo de unidade, então é o mesmo
 // pra quem acessa por qualquer domínio (prudente, paulista, etc). É aqui que a Visão
@@ -511,6 +511,9 @@ const DESAFIOS_PADRAO = [
 const CONFIG_PADRAO = {
   agendarURL: AGENDAR_URL_PADRAO,
   desafios: DESAFIOS_PADRAO,
+  // Frase que aparece no topo do app (editável pela dona no Painel Web,
+  // sem precisar mexer em código — ver "salvarConfig" e a aba Visão geral).
+  avisoTopo: "Você está em uma versão teste da Arena Spin.",
   desafio: {
     nome: "DESAFIO DAS MISSÕES",
     periodo: "05/AGO A 20/SET",
@@ -1073,6 +1076,10 @@ const ICONE = {
     <circle key="a" cx="12" cy="12" r="10" />,
     <path key="b" d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" />,
     <path key="c" d="M2 12h20" />,
+  ],
+  sino: [
+    <path key="a" d="M10.268 21a2 2 0 0 0 3.464 0" />,
+    <path key="b" d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326" />,
   ],
   pessoa: [
     <circle key="a" cx="12" cy="8" r="5" />,
@@ -1928,6 +1935,7 @@ export default function App() {
   const [verReacoes, setVerReacoes] = useState(null); // postId do modal "quem reagiu"
   const [visitados, setVisitados] = useState([]);      // chaves dos últimos perfis xeretados (só neste aparelho)
   const [termosRecentes, setTermosRecentes] = useState([]);
+  const [ultimaVisitaNotif, setUltimaVisitaNotif] = useState(0);
   const [frasesLidas, setFrasesLidas] = useState([]);   // ids das últimas frases lidas (só neste aparelho)
   const [favoritos, setFavoritos] = useState([]);        // ids de parceiros favoritados (só neste aparelho)
   const [recolhidos, setRecolhidos] = useState({});      // seções da home recolhidas (só neste aparelho)
@@ -2086,6 +2094,8 @@ export default function App() {
       if (Array.isArray(vs)) setVisitados(vs);
       const tr = await lerLocal(K_TERMOS);
       if (Array.isArray(tr)) setTermosRecentes(tr);
+      const uvn = await lerLocal(K_ULTIMA_VISITA_NOTIF);
+      if (typeof uvn === "number") setUltimaVisitaNotif(uvn);
       try {
         const g = await window.storage.get(K_GESTOR, false);
         if (g && g.value === GESTOR_CLUBE_PIN) setGestorClube(true);
@@ -2383,6 +2393,29 @@ export default function App() {
     try {
       await gravarShared(K_UNIDADES_REDE, novo);
       setUnidadesRede(novo);
+      if (msg) avisar(msg);
+    } catch { avisar("⚠️ Falha ao salvar."); }
+  };
+
+  // Config geral do app (hoje só o avisoTopo é editável pela dona, mas serve
+  // pra qualquer outro campo de config no futuro). Mesmo protocolo seguro de sempre.
+  const salvarConfig = async (transforma, msg) => {
+    const aplicarT = (base) => {
+      const objeto = base && typeof base === "object" ? JSON.parse(JSON.stringify(base)) : { ...CONFIG_PADRAO };
+      return transforma(objeto);
+    };
+    if (demo) {
+      const novo = aplicarT(config);
+      if (novo) { setConfig(novo); if (msg) avisar(msg); }
+      return;
+    }
+    const base = await lerShared(K.config, { ...CONFIG_PADRAO });
+    if (base === undefined) { avisar("⚠️ Sem conexão — nada foi salvo."); return; }
+    const novo = aplicarT(base);
+    if (!novo) return;
+    try {
+      await gravarShared(K.config, novo);
+      setConfig(novo);
       if (msg) avisar(msg);
     } catch { avisar("⚠️ Falha ao salvar."); }
   };
@@ -3025,6 +3058,43 @@ export default function App() {
     || (meuAluno && (meuAluno.records || []).reduce((m, r) => (r.reg && (!m || r.reg < m) ? r.reg : m), 0))
     || null;
 
+  // ---------- Notificações: feed de atividade sobre MIM, montado a partir do que já existe ----------
+  // (reações, respostas, recados, avisos do sistema/desafio) — sem backend novo, sem dado inventado.
+  const notificacoes = (() => {
+    if (!sessao || !minhaChave) return [];
+    const out = [];
+    // 1) O que o sistema/desafio já fala sobre mim (madrugada, convidados, missões, frequência etc.)
+    feedRadar.filter((e) => e.sid === sessao.sid && e.track === sessao.track).forEach((e) => {
+      out.push({ id: `radar-${e.id}`, ts: e.ts, icone: e.icon || "🐻", titulo: e.titulo, corpo: e.corpo || "" });
+    });
+    // 2) Respostas nos MEUS posts do Mural
+    muralAlunos.filter((p) => p.autorChave === minhaChave).forEach((p) => {
+      (comentarios[p.id] || []).forEach((c) => {
+        if (c.autorChave === minhaChave) return; // não notifica a própria resposta
+        out.push({ id: `coment-${c.id}`, ts: c.ts, icone: "💬", titulo: `${c.autorNome} respondeu seu post`, corpo: c.texto });
+      });
+      // 3) Reações nos MEUS posts (sem timestamp por reação — agrupo num só aviso, na data do post)
+      const rx = reacts[p.id] || {};
+      const total = Object.values(rx).reduce((s, arr) => s + ((arr && arr.filter((c) => c !== minhaChave).length) || 0), 0);
+      if (total > 0) {
+        out.push({ id: `reacao-${p.id}`, ts: p.ts, icone: "❤️", titulo: `${total} pessoa${total === 1 ? "" : "s"} reagiu ao seu post`, corpo: p.texto || "" });
+      }
+    });
+    // 4) Recados deixados no meu perfil
+    (recados[minhaChave] || []).forEach((r) => {
+      if (r.autorChave === minhaChave) return;
+      out.push({ id: `recado-${r.id}`, ts: r.ts, icone: "✍️", titulo: `${r.autorNome} deixou um recado no seu perfil`, corpo: r.texto });
+    });
+    return out.sort((a, b) => b.ts - a.ts).slice(0, 60);
+  })();
+  const naoLidas = notificacoes.filter((n) => n.ts > ultimaVisitaNotif).length;
+  const abrirNotificacoes = () => {
+    setTela("notificacoes");
+    const agora = Date.now();
+    setUltimaVisitaNotif(agora);
+    if (!demo) gravarLocal(K_ULTIMA_VISITA_NOTIF, agora);
+  };
+
   // ---------- Shell ----------
   if (!prontoSessao) {
     return (
@@ -3053,11 +3123,16 @@ export default function App() {
           alignItems: "center", gap: 8,
           padding: "calc(env(safe-area-inset-top) + 12px) 16px 0", background: C.bg,
         }}>
-          <span />
+          <button onClick={() => setTela("global")} aria-label="Global" style={{
+            width: 38, height: 38, borderRadius: 10, background: C.panelSoft, border: `1px solid ${C.line}`,
+            cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+          }}>
+            <Ic nome="globo" size={19} stroke={1.8} style={{ color: C.oak }} />
+          </button>
           <span style={{
             textAlign: "center", color: C.oak, fontWeight: 700, fontSize: 12, letterSpacing: 0.3,
             overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-          }}>Você está na <b style={{ fontWeight: 800 }}>Arena Spin</b>.</span>
+          }}>{config.avisoTopo || "Você está em uma versão teste da Arena Spin."}</span>
           <button onClick={() => setMenuAberto(true)} aria-label="Abrir menu" style={{
             width: 38, height: 38, borderRadius: 10, background: C.panelSoft, border: `1px solid ${C.line}`,
             cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
@@ -3074,7 +3149,7 @@ export default function App() {
         style={{ maxWidth: 520, margin: "0 auto", padding: "16px 16px 110px" }}>
         {conteudo}
       </div>
-      {!semNav && <BarraInferior tela={tela} setTela={setTela} />}
+      {!semNav && <BarraInferior tela={tela} setTela={setTela} foto={minhaFoto} nome={sessao && sessao.name} naoLidas={naoLidas} abrirNotificacoes={abrirNotificacoes} />}
       <Toast msg={msg} />
     </div>
   );
@@ -3140,6 +3215,8 @@ export default function App() {
       painelAtivo = <PainelCadastrosAlunos allData={allDataUn} fotos={fotos} salvarCadastroAluno={salvarCadastroAluno} avisar={avisar} semCabecalho unidadesRede={unidadesRede} />;
     } else if (abaAdminLarga === "unidades" && adminSuper) {
       painelAtivo = <PainelUnidades unidadesRede={unidadesRede} salvarUnidadesRede={salvarUnidadesRede} allData={allData} semCabecalho />;
+    } else if (abaAdminLarga === "desafios" && (adminSuper || adminPerms.painelCompleto || adminPerms.editarArena)) {
+      painelAtivo = <PainelDesafios config={config} salvarConfig={salvarConfig} semCabecalho />;
     } else if (abaAdminLarga === "clube" && clubeAcesso.ver) {
       painelAtivo = <CadastroClube clube={clube} salvarClube={salvarClube} removerParceiro={removerParceiro}
         lancarCampanha={lancarCampanha} metricas={metricas} acesso={clubeAcesso} semCabecalho voltar={() => {}} />;
@@ -3319,6 +3396,7 @@ export default function App() {
             {abaBtnLarga("missoes", "🐻 Missões & Arena")}
             {abaBtnLarga("admins", "🔑 Gestão de admins", adminSuper)}
             {abaBtnLarga("unidades", "🏢 Unidades", adminSuper)}
+            {abaBtnLarga("desafios", "🎪 Desafios", adminSuper || !!adminPerms.painelCompleto || !!adminPerms.editarArena)}
           </nav>
           {!compacta && (
             <div style={{ marginTop: "auto", padding: 16, display: "grid", gap: 8 }}>
@@ -3444,9 +3522,11 @@ export default function App() {
               <div style={{
                 width: 84, height: 84, borderRadius: "50%", border: `2px solid ${C.tealSoft}66`, flexShrink: 0,
                 display: "flex", alignItems: "center", justifyContent: "center", background: C.panelSoft, overflow: "hidden",
-              }}>{(fixado.icone || "urso") === "urso"
-                ? <img src={ursoLogoDesafioImg} alt={fixado.nome} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                : <Ic nome={fixado.icone} size={44} stroke={1.4} style={{ color: C.oak }} />}</div>
+              }}>{fixado.foto
+                ? <img src={fixado.foto} alt={fixado.nome} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                : (fixado.icone || "urso") === "urso"
+                  ? <img src={ursoLogoDesafioImg} alt={fixado.nome} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  : <Ic nome={fixado.icone} size={44} stroke={1.4} style={{ color: C.oak }} />}</div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <div style={{ color: C.cream, fontWeight: 800, fontSize: 16, letterSpacing: 0.5 }}>{fixado.nome}</div>
@@ -3633,6 +3713,7 @@ export default function App() {
       avisar={avisar} renderPost={renderPost}
       irEditar={() => setTela("perfil")}
       voltar={() => setTela("inicio")}
+      config={config}
     />
   ) : null;
 
@@ -3733,13 +3814,17 @@ export default function App() {
     <TelaIndicarAmigo minhasIndicacoes={indicacoes[minhaChave] || []} indicarAmigo={indicarAmigo} avisar={avisar} voltar={() => setTela("inicio")} />
   );
 
+  const telaNotificacoes = (
+    <TelaNotificacoes notificacoes={notificacoes} voltar={() => setTela("inicio")} />
+  );
+
   const conteudo = {
     inicio: telaInicio, mural: telaMural, ranking: telaRanking, agenda: telaAgenda,
     clube: telaClube, cadastroClube: telaCadastroClube, busca: telaBusca, arena: telaArena,
     favoritos: telaFavoritos, painel: telaPainel, gestaoAdmins: telaGestaoAdmins,
     alunoPerfil: telaAlunoPerfil, instantes: telaInstantes,
     global: telaGlobal, perfil: telaPerfil, fotosAlunos: telaFotos,
-    indicarAmigo: telaIndicarAmigo,
+    indicarAmigo: telaIndicarAmigo, notificacoes: telaNotificacoes,
   }[tela] || telaInicio;
 
   return (
@@ -3877,17 +3962,17 @@ function CabecalhoTela({ titulo, sub, voltar }) {
 }
 
 // ---------- Barra inferior ----------
-function BarraInferior({ tela, setTela }) {
-  const item = (id, conteudo) => {
+function BarraInferior({ tela, setTela, foto, nome, naoLidas = 0, abrirNotificacoes }) {
+  const item = (id, conteudo, onClick) => {
     const ativo = tela === id;
     return (
-      <button key={id} onClick={() => setTela(id)} aria-label={id} style={{
+      <button key={id} onClick={onClick || (() => setTela(id))} aria-label={id} style={{
         background: "transparent", border: "none", cursor: "pointer", flex: 1,
         display: "flex", alignItems: "center", justifyContent: "center",
         padding: "7px 0", color: ativo ? C.cream : C.mut,
       }}>
         <span style={{
-          width: 56, height: 38, borderRadius: 999,
+          width: 56, height: 38, borderRadius: 999, position: "relative",
           display: "flex", alignItems: "center", justifyContent: "center",
           background: ativo ? `${C.cream}1F` : "transparent",
           transition: "background .18s ease",
@@ -3912,11 +3997,27 @@ function BarraInferior({ tela, setTela }) {
         boxShadow: "0 8px 28px rgba(0,0,0,.35)",
         padding: "2px 6px",
       }}>
-        {item("inicio", (a) => <Ic nome="casa" size={24} stroke={a ? 2.1 : 1.7} />)}
+        {item("inicio", (a) => (
+          <span style={{ boxShadow: a ? `0 0 0 2px ${C.oak}` : "none", borderRadius: "50%" }}>
+            <Avatar foto={foto} nome={nome} size={30} />
+          </span>
+        ))}
+        {item("notificacoes", (a) => (
+          <>
+            <Ic nome="sino" size={24} stroke={a ? 2.1 : 1.7} />
+            {naoLidas > 0 && (
+              <span style={{
+                position: "absolute", top: 2, right: 10, minWidth: 15, height: 15, borderRadius: 999,
+                background: "#E0524F", color: "#fff", fontSize: 9.5, fontWeight: 800,
+                display: "flex", alignItems: "center", justifyContent: "center", padding: "0 3px",
+                border: `1.5px solid ${C.navy}`,
+              }}>{naoLidas > 9 ? "9+" : naoLidas}</span>
+            )}
+          </>
+        ), abrirNotificacoes)}
         {item("instantes", (a) => <Ic nome="balaoTracejado" size={24} stroke={a ? 2.1 : 1.7} />)}
         {item("busca", (a) => <Ic nome="lupa" size={24} stroke={a ? 2.1 : 1.7} />)}
         {item("favoritos", (a) => <Ic nome="ticket" size={24} stroke={a ? 2.1 : 1.7} />)}
-        {item("global", (a) => <Ic nome="globo" size={24} stroke={a ? 2.1 : 1.7} />)}
       </div>
     </div>
   );
@@ -4491,7 +4592,7 @@ function TelaInstantes({ instantes, minhaChave, admin, postar, apagar, renderPos
 }
 
 // ---------- Página pública do aluno (estilo perfil de rede social) ----------
-function TelaPerfilAluno({ track, sid, allData, perfis, fotos, muralVisivel, feedRadar, ehMeu, torcida, torcer, minhaChave, recados, deixarRecado, apagarRecado, admin, giro175, alternarGiro175, pacotes4, alternarPacotes4, relampago, alternarRelampago, equipe, alternarEquipe, gestaoApp, alternarGestaoApp, podeMarcarEquipe, adminMissoes, avisar, irEditar, renderPost, voltar }) {
+function TelaPerfilAluno({ track, sid, allData, perfis, fotos, muralVisivel, feedRadar, ehMeu, torcida, torcer, minhaChave, recados, deixarRecado, apagarRecado, admin, giro175, alternarGiro175, pacotes4, alternarPacotes4, relampago, alternarRelampago, equipe, alternarEquipe, gestaoApp, alternarGestaoApp, podeMarcarEquipe, adminMissoes, avisar, irEditar, renderPost, voltar, config }) {
   const [novoRec, setNovoRec] = useState("");
   const chave = `${track}:${sid}`;
   const trilha = TRACKS.find((t) => t.id === track);
@@ -4592,7 +4693,11 @@ function TelaPerfilAluno({ track, sid, allData, perfis, fotos, muralVisivel, fee
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
         {participa && prog ? (
           <Painel style={{ textAlign: "center", padding: "16px 8px", display: "flex", flexDirection: "column", alignItems: "center", gap: 7 }}>
-            <img src={ursoCabecaImg} alt="Desafio das Missões" style={{ width: 30, height: 30, borderRadius: "50%", objectFit: "cover" }} />
+            {(() => {
+              const dMissoes = (config && (config.desafios || DESAFIOS_PADRAO) || DESAFIOS_PADRAO).find((d) => d.id === "missoes");
+              const fotoDesafio = dMissoes && dMissoes.foto;
+              return <img src={fotoDesafio || ursoLogoDesafioImg} alt="Desafio das Missões" style={{ width: 30, height: 30, borderRadius: "50%", objectFit: "cover" }} />;
+            })()}
             <div style={{ fontWeight: 800, fontSize: 10.5, letterSpacing: 0.4, lineHeight: 1.3 }}>DESAFIO DAS MISSÕES</div>
             <div style={{ color: C.mut, fontSize: 10.5, lineHeight: 1.4 }}>
               <b style={{ color: C.oak }}>{prog.doneCount}/9</b> · {prog.p.maratona || 0} aulas
@@ -4774,7 +4879,7 @@ function BarraGraf({ rotulo, valor, max, sufixo = "", cor }) {
   );
 }
 
-function TelaPainelAdm({ metricas, clube, fotos, allData, muralAlunos, reacts, comentarios, abrirPerfilAluno, profundo, presenca = {}, irAdmins, semCabecalho, voltar, config, irCadastros, irClube, irMissoes }) {
+function TelaPainelAdm({ metricas, clube, fotos, allData, muralAlunos, reacts, comentarios, abrirPerfilAluno, profundo, presenca = {}, irAdmins, semCabecalho, voltar, config, irCadastros, irClube, irMissoes, adminSuper, salvarConfig }) {
   const [ordem, setOrdem] = useState("recentes"); // recentes | az | ativos
   const [verTodosAlunos, setVerTodosAlunos] = useState(false);
   const noDash = !!(irCadastros || irClube || irMissoes); // só true dentro do Painel Web (dashboard)
@@ -5135,6 +5240,87 @@ function slugify(txt) {
   return (txt || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }
+// ---------- Desafios da Arena (só a dona/painelCompleto) — foto de cada desafio ----------
+function PainelDesafios({ config, salvarConfig, semCabecalho, voltar }) {
+  const ROTULOS = { andamento: "EM ANDAMENTO", breve: "EM BREVE", encerrado: "ENCERRADO" };
+  const [enviando, setEnviando] = useState(null); // id do desafio com upload em andamento
+  const fileRefs = useRef({});
+  const lista = config.desafios || DESAFIOS_PADRAO;
+
+  const trocarFoto = (id, file) => {
+    if (!file) return;
+    setEnviando(id);
+    lerImagem(file, (dataURL) => {
+      salvarConfig((c) => {
+        if (!c.desafios) c.desafios = JSON.parse(JSON.stringify(DESAFIOS_PADRAO));
+        const d = c.desafios.find((x) => x.id === id);
+        if (d) d.foto = dataURL;
+        return c;
+      }, "📸 Foto do desafio atualizada!");
+      setEnviando(null);
+    }, 640);
+  };
+
+  const removerFoto = (id) => {
+    salvarConfig((c) => {
+      if (!c.desafios) c.desafios = JSON.parse(JSON.stringify(DESAFIOS_PADRAO));
+      const d = c.desafios.find((x) => x.id === id);
+      if (d) d.foto = null;
+      return c;
+    }, "🗑 Foto removida — volta a usar o ícone padrão.");
+  };
+
+  return (
+    <>
+      {!semCabecalho && <CabecalhoTela titulo="DESAFIOS DA ARENA" sub="Troque a foto de cada desafio aqui. Ela aparece no feed, no perfil do aluno e na Arena — nos 3 lugares de uma vez só." voltar={voltar} />}
+      {semCabecalho && (
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ color: C.mut, fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 6 }}>PAINEL ADMINISTRATIVO</div>
+          <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: 0.3 }}>Desafios da Arena</div>
+          <div style={{ color: C.mut, fontSize: 13, marginTop: 4 }}>Troque a foto de cada desafio aqui — atualiza no feed, no perfil do aluno e na Arena de uma vez só.</div>
+        </div>
+      )}
+      <div style={{ display: "grid", gap: 12 }}>
+        {lista.map((d) => (
+          <Painel key={d.id} style={{ display: "flex", gap: 14, alignItems: "center" }}>
+            <div style={{
+              width: 64, height: 64, borderRadius: "50%", flexShrink: 0, overflow: "hidden",
+              background: C.panelSoft, border: `1.5px solid ${C.line}`,
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}>
+              {d.foto
+                ? <img src={d.foto} alt={d.nome} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                : (d.icone || "urso") === "urso"
+                  ? <img src={ursoLogoDesafioImg} alt={d.nome} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  : <Ic nome={d.icone} size={30} stroke={1.4} style={{ color: C.oak }} />}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 800, fontSize: 13.5 }}>{d.nome}</div>
+              <div style={{ color: C.mut, fontSize: 11.5 }}>{d.periodo} · {ROTULOS[d.status] || d.status}</div>
+              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <button disabled={enviando === d.id} style={{
+                  ...btnFantasma(), border: `1px solid ${C.line}`, borderRadius: 8, padding: "7px 12px", fontSize: 11.5,
+                  opacity: enviando === d.id ? 0.6 : 1,
+                }} onClick={() => fileRefs.current[d.id] && fileRefs.current[d.id].click()}>
+                  📷 {enviando === d.id ? "Enviando…" : d.foto ? "Trocar foto" : "Adicionar foto"}
+                </button>
+                <input ref={(el) => (fileRefs.current[d.id] = el)} type="file" accept="image/*" style={{ display: "none" }}
+                  onChange={(e) => { trocarFoto(d.id, e.target.files && e.target.files[0]); e.target.value = ""; }} />
+                {d.foto && (
+                  <button style={{ ...btnFantasma(), color: C.mut, fontSize: 11.5 }} onClick={() => removerFoto(d.id)}>Remover</button>
+                )}
+              </div>
+            </div>
+          </Painel>
+        ))}
+      </div>
+      <div style={{ color: C.mut, fontSize: 10.5, marginTop: 14, lineHeight: 1.5 }}>
+        ⚠️ Sem foto customizada, o desafio usa o ícone padrão (🐻 urso, 🎲 dado, 🏆 troféu conforme o tipo). Recomendo fotos quadradas — elas aparecem em círculo.
+      </div>
+    </>
+  );
+}
+
 function PainelUnidades({ unidadesRede, salvarUnidadesRede, allData, semCabecalho, voltar }) {
   const vazio = { nome: "", cidade: "", whats: "" };
   const [form, setForm] = useState(null); // null = lista; objeto = criando/editando
@@ -5686,9 +5872,11 @@ function TelaArena({ desafios, voltar }) {
                 background: C.panelSoft, border: `1.5px solid ${CORES_ST[d.status]}55`,
                 display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, overflow: "hidden",
               }}>
-                {(d.icone || "urso") === "urso"
-                  ? <img src={ursoLogoDesafioImg} alt={d.nome} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                  : <Ic nome={d.icone} size={40} stroke={1.4} style={{ color: C.oak }} />}
+                {d.foto
+                  ? <img src={d.foto} alt={d.nome} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  : (d.icone || "urso") === "urso"
+                    ? <img src={ursoLogoDesafioImg} alt={d.nome} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    : <Ic nome={d.icone} size={40} stroke={1.4} style={{ color: C.oak }} />}
               </div>
               {/* Resumo à direita */}
               <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
@@ -5994,6 +6182,32 @@ function TicketIndicacao({ n, alcancado, premio }) {
         <span style={{ fontSize: 11, fontWeight: 800, color: alcancado ? C.oak : C.mut }}>{alcancado ? "✓" : n}</span>
       )}
     </div>
+  );
+}
+
+// ---------- Notificações: tudo que aconteceu comigo, num lugar só ----------
+function TelaNotificacoes({ notificacoes, voltar }) {
+  return (
+    <>
+      <CabecalhoTela titulo="NOTIFICAÇÕES" sub="Reações, respostas, recados e avisos do desafio — sobre você." voltar={voltar} />
+      <div style={{ display: "grid", gap: 8 }}>
+        {notificacoes.map((n) => (
+          <Painel key={n.id} style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+            <span style={{ fontSize: 20, flexShrink: 0, lineHeight: 1 }}>{n.icone}</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: 13, lineHeight: 1.35 }}>{n.titulo}</div>
+              {n.corpo && <div style={{ color: C.mut, fontSize: 12, marginTop: 3, lineHeight: 1.4 }}>{n.corpo}</div>}
+              <div style={{ color: C.oak, fontSize: 10.5, marginTop: 5 }}>{agoLabel(n.ts)}</div>
+            </div>
+          </Painel>
+        ))}
+        {notificacoes.length === 0 && (
+          <Painel><div style={{ color: C.mut, fontSize: 13, textAlign: "center", lineHeight: 1.6 }}>
+            Nada por aqui ainda. Quando alguém reagir, responder ou deixar um recado pra você, aparece aqui. 🔔
+          </div></Painel>
+        )}
+      </div>
+    </>
   );
 }
 
