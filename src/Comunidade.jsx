@@ -1848,6 +1848,7 @@ export default function App() {
   // Uma vez escolhido (clicou em "versão mobile" ou "abrir painel completo"), SÓ muda de novo com outro clique —
   // nem redimensionar a janela, nem dar F5/apertar Enter na barra de endereço muda mais sozinho.
   const [modoPainelWeb, setModoPainelWeb] = useState(null);
+  const [seletorUnidadeAberto, setSeletorUnidadeAberto] = useState(false);
   const escolherModoPainel = (modo) => { // modo: "web" | "mobile"
     setModoPainelWeb(modo);
     if (!demo) gravarLocal(K_MODO_PAINEL, modo);
@@ -3064,27 +3065,65 @@ export default function App() {
       painelAtivo = <TelaGestaoAdmins adminsReg={adminsReg} salvarAdmins={salvarAdmins} allData={allData} fotos={fotos} avisar={avisar} semCabecalho voltar={() => {}} />;
     } else if (abaAdminLarga === "missoes") {
       const linhas = TRACKS.map((t) => {
-        const alunos = ((allData[t.id] || {}).students || []);
-        const comProgresso = alunos.filter((s) => (s.records || []).length > 0 || (s.guests || []).length > 0);
+        const alunosTrack = ((allData[t.id] || {}).students || []);
+        const comProgresso = alunosTrack.filter((s) => (s.records || []).length > 0 || (s.guests || []).length > 0);
         const cartelaCheia = comProgresso.filter((s) => computeProgress(s, t.targets).full).length;
         const ranking = [...comProgresso]
           .map((s) => ({ nome: s.name, prog: computeProgress(s, t.targets) }))
           .sort((a, b) => b.prog.doneCount - a.prog.doneCount || b.prog.p.maratona - a.prog.p.maratona)
           .slice(0, 8);
-        return { t, alunos: alunos.length, comProgresso: comProgresso.length, cartelaCheia, ranking };
+        return { t, alunos: alunosTrack.length, comProgresso: comProgresso.length, cartelaCheia, ranking };
       });
+      const totCadastrados = linhas.reduce((s, l) => s + l.alunos, 0);
+      const totAtivos = linhas.reduce((s, l) => s + l.comProgresso, 0);
+      const totCartelas = linhas.reduce((s, l) => s + l.cartelaCheia, 0);
+      const taxaParticipacao = totCadastrados ? Math.round((totAtivos / totCadastrados) * 100) : 0;
+      const exportarRankingMissoes = () => {
+        const linhasCsv = [["Grupo", "Posição", "Aluno", "Missões cumpridas"]];
+        linhas.forEach(({ t, ranking }) => ranking.forEach((r, i) => linhasCsv.push([t.label, i + 1, r.nome, `${r.prog.doneCount}/9`])));
+        const csv = linhasCsv.map((l) => l.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(";")).join("\n");
+        const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url; a.download = `ranking-missoes-${UNIDADE}-${new Date().toISOString().slice(0, 10)}.csv`;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      };
       painelAtivo = (
-        <div style={{ display: "grid", gap: 18 }}>
-          <div style={{ color: C.oak, fontWeight: 800, fontSize: 16, letterSpacing: 0.5 }}>🏟️ MISSÕES · VISÃO GERAL</div>
-          <div style={{ color: C.mut, fontSize: 12.5, lineHeight: 1.5 }}>
-            Edição de missões, prêmios e Missões Relâmpago ainda é feita no app do Desafio — aqui é só leitura e acompanhamento.
+        <div>
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ color: C.mut, fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 6 }}>PAINEL ADMINISTRATIVO</div>
+            <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: 0.3 }}>Missões & Arena</div>
+            <div style={{ color: C.mut, fontSize: 13, marginTop: 4 }}>Acompanhe participação, avanço e grupos do desafio</div>
           </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 20 }}>
+            {[["CADASTRADOS", totCadastrados, false], ["ATIVOS NO DESAFIO", totAtivos, false], ["TAXA DE PARTICIPAÇÃO", `${taxaParticipacao}%`, false], ["CARTELAS CHEIAS", totCartelas, true]].map(([label, valor, destaque]) => (
+              <Painel key={label} style={{ border: destaque ? `1.5px solid ${C.oak}` : undefined, display: "grid", gap: 4 }}>
+                <div style={{ color: C.mut, fontSize: 10.5, fontWeight: 700, letterSpacing: 0.4 }}>{label}</div>
+                <div style={{ color: C.cream, fontWeight: 800, fontSize: 24 }}>{valor}</div>
+              </Painel>
+            ))}
+          </div>
+          <Painel style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18, flexWrap: "wrap", gap: 10 }}>
+            <div>
+              <div style={{ fontWeight: 800, fontSize: 14 }}>Acompanhamento por grupo</div>
+              <div style={{ color: C.mut, fontSize: 12, marginTop: 3 }}>Edição de missões, prêmios e Missões Relâmpago continua sendo feita no app do Desafio — aqui é só leitura e acompanhamento.</div>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={exportarRankingMissoes} style={{ ...btnFantasma(), border: `1px solid ${C.line}`, borderRadius: 10, padding: "9px 14px", fontSize: 12 }}>
+                ↓ Exportar ranking
+              </button>
+              <a href={DESAFIO_URL} target="_blank" rel="noreferrer" style={{ ...btnPrimario(), width: "auto", padding: "9px 16px", fontSize: 12, textDecoration: "none", display: "inline-block" }}>
+                Abrir app do desafio ↗
+              </a>
+            </div>
+          </Painel>
           <div style={{ display: "grid", gridTemplateColumns: `repeat(${linhas.length}, 1fr)`, gap: 14 }}>
-            {linhas.map(({ t, alunos, comProgresso, cartelaCheia, ranking }) => (
+            {linhas.map(({ t, alunos: qtdAlunos, comProgresso, cartelaCheia, ranking }) => (
               <Painel key={t.id} style={{ display: "grid", gap: 10 }}>
                 <div style={{ fontWeight: 800, fontSize: 13.5 }}>{t.label}</div>
                 <div style={{ display: "flex", gap: 14, fontSize: 12, color: C.mut }}>
-                  <span><b style={{ color: C.tealSoft }}>{alunos}</b> cadastrados</span>
+                  <span><b style={{ color: C.tealSoft }}>{qtdAlunos}</b> cadastrados</span>
                   <span><b style={{ color: C.tealSoft }}>{comProgresso}</b> ativos</span>
                   <span><b style={{ color: C.oak }}>{cartelaCheia}</b> cartela cheia</span>
                 </div>
@@ -3106,7 +3145,11 @@ export default function App() {
       painelAtivo = <TelaPainelAdm metricas={metricas} clube={clube} fotos={fotos} allData={allData}
         muralAlunos={muralAlunos} reacts={reacts} comentarios={comentarios}
         profundo={adminSuper || !!adminPerms.painelCompleto} presenca={presenca}
-        abrirPerfilAluno={abrirPerfilAluno} irAdmins={null} semCabecalho voltar={() => {}} />;
+        abrirPerfilAluno={abrirPerfilAluno} irAdmins={null} semCabecalho voltar={() => {}}
+        config={config}
+        irCadastros={podeVerCadastros ? () => setAbaAdminLarga("cadastros") : null}
+        irClube={clubeAcesso.ver ? () => setAbaAdminLarga("clube") : null}
+        irMissoes={() => setAbaAdminLarga("missoes")} />;
     }
     const compacta = larguraJanela < 760; // celular ou janela estreita: barra lateral vira topo
     return (
@@ -3132,6 +3175,49 @@ export default function App() {
               </button>
             )}
           </div>
+          {(() => {
+            const unidades = config.unidades || [];
+            const atual = unidades.find((u) => u.id === UNIDADE) || { id: UNIDADE, nome: UNIDADE_NOME, cidade: "" };
+            return (
+              <div style={{ position: "relative", padding: compacta ? "0 16px 10px" : "0 16px 14px" }}>
+                <div onClick={() => setSeletorUnidadeAberto(!seletorUnidadeAberto)} style={{
+                  border: `1px solid ${C.line}`, borderRadius: 10, padding: "9px 11px", cursor: "pointer",
+                  display: "flex", justifyContent: "space-between", alignItems: "center",
+                }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ color: C.mut, fontSize: 9.5, fontWeight: 700, letterSpacing: 0.5 }}>UNIDADE</div>
+                    <div style={{ fontSize: 12.5, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{atual.nome}</div>
+                  </div>
+                  <span style={{ color: C.mut, fontSize: 11, flexShrink: 0, marginLeft: 6 }}>{seletorUnidadeAberto ? "︿" : "⌄"}</span>
+                </div>
+                {seletorUnidadeAberto && (
+                  <div style={{
+                    position: "absolute", top: "calc(100% + 4px)", left: 16, right: 16, zIndex: 50,
+                    background: C.panel, border: `1px solid ${C.line}`, borderRadius: 10,
+                    boxShadow: "0 12px 32px rgba(0,0,0,.3)", maxHeight: 260, overflowY: "auto", padding: 6,
+                  }}>
+                    {unidades.map((u) => (
+                      <div key={u.id} onClick={() => {
+                        setSeletorUnidadeAberto(false);
+                        if (u.id !== UNIDADE) avisar("🚧 Essa unidade ainda não tem o Comunidade implantado — os dados aqui continuam sendo só da " + UNIDADE_NOME + ".");
+                      }} style={{
+                        padding: "8px 9px", borderRadius: 8, cursor: "pointer", fontSize: 12.5,
+                        fontWeight: u.id === UNIDADE ? 700 : 600,
+                        color: u.id === UNIDADE ? C.cream : C.mut,
+                        background: u.id === UNIDADE ? C.panelSoft : "transparent",
+                      }}>
+                        {u.nome}
+                        {u.cidade && <div style={{ fontSize: 10.5, color: C.mut, fontWeight: 500 }}>{u.cidade}</div>}
+                      </div>
+                    ))}
+                    <div style={{ color: C.mut, fontSize: 10, padding: "6px 9px 2px", lineHeight: 1.4 }}>
+                      Outras unidades entram aqui conforme forem implantadas.
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
           <nav style={{
             display: "flex", flexDirection: compacta ? "row" : "column", marginTop: 4,
             overflowX: compacta ? "auto" : "visible", WebkitOverflowScrolling: "touch",
@@ -3955,9 +4041,33 @@ function CadastroClube({ clube, salvarClube, removerParceiro, lancarCampanha, me
     setForm(null);
   };
 
+  const ativos = parceiros.filter((p) => !p.pagoAte || p.pagoAte >= hoje).length;
+  const vencidos = parceiros.filter((p) => p.pagoAte && p.pagoAte < hoje).length;
+  const receitaMensal = parceiros
+    .filter((p) => !p.pagoAte || p.pagoAte >= hoje)
+    .reduce((s, p) => s + (parseFloat(String(p.mensalidade).replace(",", ".")) || 0), 0);
+  const aberturasQR = parceiros.reduce((s, p) => s + (((metricas.parceiros || {})[p.id] || {}).aberturas || 0), 0);
+
   return (
     <>
       {!semCabecalho && <CabecalhoTela titulo="GESTÃO DO CLUBE" sub="Espaço da gestão terceirizada: cadastro, cobrança e vigência dos parceiros. Cada parceiro recebe um código de acesso para gerenciar os próprios vouchers (tela de login → 🏪 Acesso parceiro). Parceiro com mensalidade vencida sai da vitrine automaticamente." voltar={voltar} />}
+      {semCabecalho && !form && (
+        <>
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ color: C.mut, fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 6 }}>PAINEL ADMINISTRATIVO</div>
+            <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: 0.3 }}>Clube Spincycle</div>
+            <div style={{ color: C.mut, fontSize: 13, marginTop: 4 }}>Parceiros, benefícios, vigência e recebimentos</div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 20 }}>
+            {[["PARCEIROS ATIVOS", ativos], ["VENCIDOS", vencidos], ["RECEITA MENSAL", `R$ ${receitaMensal.toFixed(2).replace(".", ",")}`], ["ABERTURAS DE QR", aberturasQR]].map(([label, valor]) => (
+              <Painel key={label} style={{ display: "grid", gap: 4 }}>
+                <div style={{ color: C.mut, fontSize: 10.5, fontWeight: 700, letterSpacing: 0.4 }}>{label}</div>
+                <div style={{ color: C.cream, fontWeight: 800, fontSize: 22 }}>{valor}</div>
+              </Painel>
+            ))}
+          </div>
+        </>
+      )}
       {!form ? (
         <>
           <button style={{ ...btnPrimario(), marginBottom: 12 }} onClick={() => setForm({ ...vazio })}>+ NOVO PARCEIRO</button>
@@ -4572,13 +4682,17 @@ function BarraGraf({ rotulo, valor, max, sufixo = "", cor }) {
   );
 }
 
-function TelaPainelAdm({ metricas, clube, fotos, allData, muralAlunos, reacts, comentarios, abrirPerfilAluno, profundo, presenca = {}, irAdmins, semCabecalho, voltar }) {
+function TelaPainelAdm({ metricas, clube, fotos, allData, muralAlunos, reacts, comentarios, abrirPerfilAluno, profundo, presenca = {}, irAdmins, semCabecalho, voltar, config, irCadastros, irClube, irMissoes }) {
   const [ordem, setOrdem] = useState("recentes"); // recentes | az | ativos
   const [verTodosAlunos, setVerTodosAlunos] = useState(false);
+  const noDash = !!(irCadastros || irClube || irMissoes); // só true dentro do Painel Web (dashboard)
   const dia = 86400000;
   const alunos = Object.entries(metricas.alunos || {}).map(([chave, a]) => ({ chave, ...a }));
   const hoje = alunos.filter((a) => Date.now() - (a.ultima || 0) < dia).length;
   const semana = alunos.filter((a) => Date.now() - (a.ultima || 0) < 7 * dia).length;
+  const mes = alunos.filter((a) => Date.now() - (a.ultima || 0) < 30 * dia).length;
+  const pctCadastrados = alunos.length ? Math.round((hoje / alunos.length) * 100) : 0;
+  const deltaSemana = semana - hoje;
 
   // Quem participa de desafio (tem registro na cartela)
   const participantes = new Set();
@@ -4627,11 +4741,46 @@ function TelaPainelAdm({ metricas, clube, fotos, allData, muralAlunos, reacts, c
   const resumoTelas = (t) => Object.entries(t || {}).sort((a, b) => b[1] - a[1]).slice(0, 3)
     .map(([k, v]) => `${k} ${v}×`).join(" · ");
 
+  // ---------- Atenção agora: alertas reais, calculados a partir dos dados acima ----------
+  const alunosBaixaAtividade = alunos.filter((a) => (a.entradas || 0) <= 1 && !resumoTelas(a.telas));
+  const diferencaDesafio = minDesafio - minFora;
+  const parceirosEmpatados = parceiros.length >= 2 && parceiros[0].aberturas > 0 && parceiros[0].aberturas === parceiros[1].aberturas;
+  const alertas = [];
+  if (profundo && alunosBaixaAtividade.length > 0) {
+    alertas.push({
+      icone: "⏳", cor: C.oak,
+      titulo: `${alunosBaixaAtividade.length} aluno(s) com baixa atividade`,
+      desc: alunosBaixaAtividade.length === 1 ? "Acessou apenas a página inicial" : "Acessaram apenas a página inicial",
+    });
+  }
+  if (profundo && diferencaDesafio > 0 && minFora > 0) {
+    alertas.push({
+      icone: "🐻", cor: C.tealSoft, titulo: "Desafio gera mais retenção",
+      desc: `+${diferencaDesafio} min de diferença dentro x fora dele`,
+    });
+  }
+  if (profundo && parceirosEmpatados) {
+    alertas.push({ icone: "⭐", cor: C.oak, titulo: "Parceiros empatados", desc: `${parceiros[0].nome} e ${parceiros[1].nome} com o mesmo volume de aberturas` });
+  }
+  const pctDesafio = (minDesafio + minFora) > 0 ? Math.round((minDesafio / (minDesafio + minFora)) * 1000) / 10 : 0;
+
   return (
     <>
       {!semCabecalho && <CabecalhoTela titulo={`PAINEL · ${UNIDADE_NOME.toUpperCase()}`}
         sub="Visão da administração desta unidade — cada Spincycle terá o seu painel, separado. Números aproximados, atualizados a cada ~2 minutos de uso."
         voltar={voltar} />}
+
+      {noDash && (
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 20, flexWrap: "wrap", gap: 14 }}>
+          <div>
+            <div style={{ color: C.mut, fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 6 }}>PAINEL ADMINISTRATIVO</div>
+            <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: 0.3 }}>Visão geral</div>
+            <div style={{ color: C.mut, fontSize: 13, marginTop: 4 }}>
+              {UNIDADE_NOME} — resumo do uso e pontos que pedem atenção
+            </div>
+          </div>
+        </div>
+      )}
 
       {profundo && (() => {
         const online = Object.values(presenca).filter((ts) => Date.now() - ts < 3 * 60000).length;
@@ -4650,56 +4799,112 @@ function TelaPainelAdm({ metricas, clube, fotos, allData, muralAlunos, reacts, c
           👤 TODOS OS CADASTROS · PERMISSÕES ›
         </button>
       )}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 16 }}>
-        {[["HOJE", hoje], ["7 DIAS", semana], ["COM REGISTRO", alunos.length]].map(([r, n]) => (
-          <Painel key={r} style={{ textAlign: "center", padding: "14px 6px" }}>
-            <div style={{ color: C.tealSoft, fontWeight: 800, fontSize: 20 }}>{n}</div>
-            <div style={{ color: C.mut, fontSize: 10, fontWeight: 700, letterSpacing: 0.5, marginTop: 3 }}>{r}</div>
+      <div style={{ display: "grid", gridTemplateColumns: noDash ? "repeat(4, 1fr)" : "1fr 1fr 1fr", gap: 10, marginBottom: 16 }}>
+        {(noDash
+          ? [["ATIVOS HOJE", hoje, `${pctCadastrados}% dos cadastrados`], ["ATIVOS 7 DIAS", semana, `${deltaSemana >= 0 ? "+" : ""}${deltaSemana} vs. hoje`], ["ATIVOS 30 DIAS", mes, null], ["COM REGISTRO", alunos.length, "base monitorada"]]
+          : [["HOJE", hoje, null], ["7 DIAS", semana, null], ["COM REGISTRO", alunos.length, null]]
+        ).map(([r, n, nota]) => (
+          <Painel key={r} style={noDash ? { display: "grid", gap: 5 } : { textAlign: "center", padding: "14px 6px" }}>
+            {noDash ? (
+              <>
+                <div style={{ color: C.mut, fontSize: 10.5, fontWeight: 700, letterSpacing: 0.4 }}>{r}</div>
+                <div style={{ color: C.cream, fontWeight: 800, fontSize: 26, lineHeight: 1 }}>{n}</div>
+                {nota && <div style={{ color: C.mut, fontSize: 11 }}>{nota}</div>}
+              </>
+            ) : (
+              <>
+                <div style={{ color: C.tealSoft, fontWeight: 800, fontSize: 20 }}>{n}</div>
+                <div style={{ color: C.mut, fontSize: 10, fontWeight: 700, letterSpacing: 0.5, marginTop: 3 }}>{r}</div>
+              </>
+            )}
           </Painel>
         ))}
       </div>
 
-      {/* Desafio × tempo no app */}
+      {/* Impacto do desafio + Uso do clube (lado a lado no dashboard largo) */}
       {profundo && <>
-      <div style={{ color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 1, marginBottom: 8 }}>🏟️ DESAFIO × TEMPO NO APP</div>
-      <Painel style={{ display: "grid", gap: 10, marginBottom: 16 }}>
-        <BarraGraf rotulo="Quem está em desafio" valor={minDesafio} max={Math.max(minDesafio, minFora)} sufixo=" min (média)" cor={C.tealSoft} />
-        <BarraGraf rotulo="Quem está fora" valor={minFora} max={Math.max(minDesafio, minFora)} sufixo=" min (média)" cor={`${C.mut}`} />
-        <div style={{ color: C.mut, fontSize: 10.5, lineHeight: 1.5 }}>
-          Tempo médio acumulado no app por pessoa. Diferença grande = o desafio está segurando a comunidade. 🐻
-        </div>
-      </Painel>
-
-      {/* Clube por categoria */}
-      {categorias.length > 0 && (
-        <>
-          <div style={{ color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 1, marginBottom: 8 }}>🎟️ CLUBE · O QUE MAIS USAM, POR CATEGORIA</div>
-          <Painel style={{ display: "grid", gap: 10, marginBottom: 16 }}>
-            {categorias.map(([cat, v]) => (
-              <BarraGraf key={cat} rotulo={`${cat} · ⭐${v.favoritos}`} valor={v.aberturas} max={maxCat} sufixo=" aberturas" />
-            ))}
-          </Painel>
-        </>
-      )}
-
-      {/* Parceiros */}
-      {parceiros.length > 0 && (
-        <>
-          <div style={{ color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 1, marginBottom: 8 }}>🏪 PARCEIROS · QR NA TELA E FAVORITOS</div>
-          <Painel style={{ display: "grid", gap: 6, marginBottom: 16 }}>
-            {parceiros.map((p, i) => (
-              <div key={p.pid} style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, gap: 8 }}>
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{i + 1}. {p.nome}</span>
-                <span style={{ flexShrink: 0 }}>
-                  <span style={{ color: C.oak, fontWeight: 800 }}>👁 {p.aberturas}</span>
-                  <span style={{ color: C.tealSoft, fontWeight: 800, marginLeft: 10 }}>⭐ {p.favoritos}</span>
-                </span>
+      <div style={{ display: "grid", gridTemplateColumns: noDash ? "1.3fr 1fr" : "1fr", gap: 16, marginBottom: 16 }}>
+        <div>
+          <div style={{ color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 1, marginBottom: 8 }}>
+            🏟️ {noDash ? "IMPACTO DO DESAFIO" : "DESAFIO × TEMPO NO APP"}
+          </div>
+          <Painel style={{ display: "grid", gap: 10 }}>
+            {noDash && (
+              <div style={{ color: C.oak, fontWeight: 800, fontSize: 19 }}>
+                {minDesafio - minFora >= 0 ? "+" : ""}{minDesafio - minFora} min de diferença
               </div>
-            ))}
-            <div style={{ color: C.mut, fontSize: 10.5, lineHeight: 1.5 }}>👁 = cartão aberto com QR na tela · ⭐ = adicionado aos favoritos</div>
+            )}
+            <BarraGraf rotulo="Quem está em desafio" valor={minDesafio} max={Math.max(minDesafio, minFora)} sufixo=" min (média)" cor={C.tealSoft} />
+            <BarraGraf rotulo="Quem está fora" valor={minFora} max={Math.max(minDesafio, minFora)} sufixo=" min (média)" cor={`${C.mut}`} />
+            <div style={{ color: C.mut, fontSize: 10.5, lineHeight: 1.5 }}>
+              Tempo médio acumulado no app por pessoa. Diferença grande = o desafio está segurando a comunidade. 🐻
+            </div>
           </Painel>
-        </>
-      )}
+        </div>
+
+        {/* Clube por categoria */}
+        {categorias.length > 0 && (
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <span style={{ color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 1 }}>🎟️ USO DO CLUBE</span>
+              {noDash && irClube && (
+                <button onClick={irClube} style={{ background: "transparent", border: "none", color: C.tealSoft, fontWeight: 700, fontSize: 11.5, cursor: "pointer", fontFamily: "inherit" }}>Ver detalhes</button>
+              )}
+            </div>
+            <Painel style={{ display: "grid", gap: 10 }}>
+              {categorias.map(([cat, v]) => (
+                <BarraGraf key={cat} rotulo={`${cat} · ⭐${v.favoritos}`} valor={v.aberturas} max={maxCat} sufixo=" aberturas" />
+              ))}
+            </Painel>
+          </div>
+        )}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: noDash && alertas.length > 0 ? "1fr 1.3fr" : "1fr", gap: 16, marginBottom: 16 }}>
+        {/* Parceiros */}
+        {parceiros.length > 0 && (
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <span style={{ color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 1 }}>🏪 PARCEIROS</span>
+              {noDash && irClube && (
+                <button onClick={irClube} style={{ background: "transparent", border: "none", color: C.tealSoft, fontWeight: 700, fontSize: 11.5, cursor: "pointer", fontFamily: "inherit" }}>Gerenciar</button>
+              )}
+            </div>
+            <Painel style={{ display: "grid", gap: 6 }}>
+              {parceiros.map((p, i) => (
+                <div key={p.pid} style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, gap: 8 }}>
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{i + 1}. {p.nome}</span>
+                  <span style={{ flexShrink: 0 }}>
+                    <span style={{ color: C.oak, fontWeight: 800 }}>👁 {p.aberturas}</span>
+                    <span style={{ color: C.tealSoft, fontWeight: 800, marginLeft: 10 }}>⭐ {p.favoritos}</span>
+                  </span>
+                </div>
+              ))}
+              <div style={{ color: C.mut, fontSize: 10.5, lineHeight: 1.5 }}>👁 = cartão aberto com QR na tela · ⭐ = adicionado aos favoritos</div>
+            </Painel>
+          </div>
+        )}
+
+        {/* Atenção agora — só no dashboard largo, só com dados reais */}
+        {noDash && alertas.length > 0 && (
+          <div>
+            <div style={{ color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 1, marginBottom: 8 }}>
+              ⚠️ ATENÇÃO AGORA <span style={{ color: C.mut, fontWeight: 700 }}>· {alertas.length}</span>
+            </div>
+            <Painel style={{ display: "grid", gap: 8 }}>
+              {alertas.map((a, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: C.panelSoft, borderRadius: 10 }}>
+                  <span style={{ color: a.cor, fontSize: 15 }}>{a.icone}</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 700 }}>{a.titulo}</div>
+                    <div style={{ color: C.mut, fontSize: 11.5 }}>{a.desc}</div>
+                  </div>
+                </div>
+              ))}
+            </Painel>
+          </div>
+        )}
+      </div>
 
       {/* Campanhas: assertividade */}
       {campanhas.length > 0 && (
@@ -4722,6 +4927,56 @@ function TelaPainelAdm({ metricas, clube, fotos, allData, muralAlunos, reacts, c
             ))}
           </div>
         </>
+      )}
+
+      {/* Ações rápidas + Pulso da comunidade — só no dashboard largo */}
+      {noDash && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1.4fr", gap: 16, marginBottom: 16 }}>
+          <div>
+            <div style={{ color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 1, marginBottom: 8 }}>＋ AÇÕES RÁPIDAS</div>
+            <Painel style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              {[
+                ["👤", "Cadastrar aluno", irCadastros],
+                ["🐻", "Ver missões", irMissoes],
+                ["🎟️", "Gerenciar clube", irClube],
+                ["↓", "Exportar alunos (CSV)", () => {
+                  const linhas = [["Nome", "Entradas", "Minutos", "Última atividade"]];
+                  alunos.forEach((a) => linhas.push([a.nome || a.chave, a.entradas || 0, a.min || 0, a.ultima ? new Date(a.ultima).toLocaleDateString("pt-BR") : ""]));
+                  const csv = linhas.map((l) => l.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(";")).join("\n");
+                  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+                  const url = URL.createObjectURL(blob);
+                  const a2 = document.createElement("a");
+                  a2.href = url; a2.download = `alunos-${UNIDADE}-${new Date().toISOString().slice(0, 10)}.csv`;
+                  document.body.appendChild(a2); a2.click(); document.body.removeChild(a2);
+                  URL.revokeObjectURL(url);
+                }],
+              ].filter(([, , fn]) => !!fn).map(([icone, label, fn]) => (
+                <button key={label} onClick={fn} style={{
+                  background: C.panelSoft, border: `1px solid ${C.line}`, borderRadius: 10, color: C.cream,
+                  padding: "12px 10px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", textAlign: "left",
+                }}>
+                  <div style={{ color: C.oak, fontSize: 15, marginBottom: 4 }}>{icone}</div>{label}
+                </button>
+              ))}
+            </Painel>
+          </div>
+          <div>
+            <div style={{ color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 1, marginBottom: 8 }}>↗ PULSO DA COMUNIDADE</div>
+            <Painel>
+              <div style={{ background: C.panelSoft, borderRadius: 10, padding: "12px 14px", marginBottom: 10 }}>
+                <div style={{ fontWeight: 700, fontSize: 13 }}>Engajamento concentrado</div>
+                <div style={{ color: C.mut, fontSize: 12, marginTop: 3 }}>
+                  {(minDesafio + minFora) > 0
+                    ? `O desafio responde por ${pctDesafio}% do tempo médio observado no app.`
+                    : "Ainda sem dados suficientes de tempo no app pra calcular essa proporção."}
+                </div>
+              </div>
+              {alertas.length === 0
+                ? <div style={{ color: C.ok, fontSize: 12.5, fontWeight: 700 }}>✓ Nenhum alerta no momento</div>
+                : <div style={{ color: C.oak, fontSize: 12.5, fontWeight: 700 }}>⚠️ {alertas.length} ponto(s) pra olhar — veja "Atenção agora" acima</div>}
+            </Painel>
+          </div>
+        </div>
       )}
 
       </>}
@@ -4785,6 +5040,7 @@ function TelaPainelAdm({ metricas, clube, fotos, allData, muralAlunos, reacts, c
 // ---------- Central de cadastros e permissões (só a dona do app) ----------
 function PainelCadastrosAlunos({ allData, fotos, salvarCadastroAluno, avisar, semCabecalho, voltar }) {
   const [q, setQ] = useState("");
+  const [filtro, setFiltro] = useState("todos"); // todos | semGenero | pendentes | aprovados
   const [editando, setEditando] = useState(null); // { track, id, name, phone, genero, pass, approved }
   const rows = [];
   TRACKS.forEach((t) => {
@@ -4794,10 +5050,18 @@ function PainelCadastrosAlunos({ allData, fotos, salvarCadastroAluno, avisar, se
   rows.sort((a, b) => norm(a.s.name).localeCompare(norm(b.s.name)));
   const qNorm = norm(q);
   const qNum = q.replace(/\D/g, "");
-  const filtrados = qNorm
+  const buscados = qNorm
     ? rows.filter(({ s }) => norm(s.name).includes(qNorm) || (qNum.length >= 2 && normPhone(s.phone || "").includes(qNum)))
     : rows;
+  const filtrados = buscados.filter(({ s }) => {
+    if (filtro === "semGenero") return s.genero !== "M" && s.genero !== "F";
+    if (filtro === "pendentes") return s.approved === false;
+    if (filtro === "aprovados") return s.approved !== false;
+    return true;
+  });
   const semGenero = rows.filter(({ s }) => s.genero !== "M" && s.genero !== "F").length;
+  const pendentes = rows.filter(({ s }) => s.approved === false).length;
+  const aprovados = rows.length - pendentes;
 
   const abrirEdicao = ({ t, s }) => setEditando({
     track: t.id, id: s.id, name: s.name, phone: s.phone ? normPhone(s.phone) : "",
@@ -4819,11 +5083,35 @@ function PainelCadastrosAlunos({ allData, fotos, salvarCadastroAluno, avisar, se
   return (
     <>
       {!semCabecalho && <CabecalhoTela titulo="CADASTROS DE ALUNOS" sub="Todos os alunos dos 3 desafios, num lugar só." voltar={voltar} />}
-      <div style={{ color: C.mut, fontSize: 12, marginBottom: 10 }}>
-        {rows.length} aluno{rows.length === 1 ? "" : "s"} no total
-        {semGenero > 0 && <span style={{ color: C.oak }}> · {semGenero} sem gênero</span>}
+      {semCabecalho && (
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ color: C.mut, fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 6 }}>PAINEL ADMINISTRATIVO</div>
+          <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: 0.3 }}>Cadastros de alunos</div>
+          <div style={{ color: C.mut, fontSize: 13, marginTop: 4 }}>Todos os alunos dos 3 desafios, num lugar só — encontre e edite com rapidez.</div>
+        </div>
+      )}
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 20 }}>
+        {[["ALUNOS NO TOTAL", rows.length, false], ["SEM GÊNERO INFORMADO", semGenero, true], ["APROVADOS", aprovados, false], ["PENDENTES", pendentes, false]].map(([label, valor, destaque]) => (
+          <Painel key={label} style={{ border: destaque ? `1.5px solid ${C.oak}` : undefined, display: "grid", gap: 4 }}>
+            <div style={{ color: C.mut, fontSize: 10.5, fontWeight: 700, letterSpacing: 0.4 }}>{label}</div>
+            <div style={{ color: C.cream, fontWeight: 800, fontSize: 24 }}>{valor}</div>
+          </Painel>
+        ))}
       </div>
-      <input style={{ ...inputStyle(), marginBottom: 10 }} placeholder="Buscar por nome ou telefone…" value={q} onChange={(e) => setQ(e.target.value)} />
+
+      <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
+        <input style={{ ...inputStyle(), flex: 1, minWidth: 220 }} placeholder="🔎 Buscar por nome ou telefone…" value={q} onChange={(e) => setQ(e.target.value)} />
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {[["todos", "Todos"], ["semGenero", "Sem gênero"], ["pendentes", "Pendentes"], ["aprovados", "Aprovados"]].map(([id, label]) => (
+            <button key={id} onClick={() => setFiltro(id)} style={{
+              background: filtro === id ? C.teal : "transparent", color: filtro === id ? "#fff" : C.mut,
+              border: `1px solid ${filtro === id ? C.teal : C.line}`, borderRadius: 999, padding: "7px 14px",
+              fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+            }}>{label}</button>
+          ))}
+        </div>
+      </div>
 
       {editando && (
         <Painel style={{ display: "grid", gap: 8, marginBottom: 14, border: `1px solid ${C.teal}88` }}>
@@ -4856,30 +5144,73 @@ function PainelCadastrosAlunos({ allData, fotos, salvarCadastroAluno, avisar, se
         </Painel>
       )}
 
-      <div style={{ display: "grid", gap: 6 }}>
-        {filtrados.slice(0, 200).map(({ t, s }) => (
-          <Painel key={`${t.id}-${s.id}`} onClick={() => abrirEdicao({ t, s })} style={{
-            display: "flex", alignItems: "center", gap: 10, cursor: "pointer", padding: "10px 12px",
-          }}>
-            <Avatar foto={fotos[`${t.id}:${s.id}`]} nome={s.name} size={32} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 700, fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
-                {s.name}
-                {s.approved === false && <span style={{ color: C.amberSoft, fontSize: 10 }}>⏳ pendente</span>}
-                {(s.genero !== "M" && s.genero !== "F") && <span style={{ color: C.oak, fontSize: 10 }}>⚧ sem gênero</span>}
+      <Painel style={{ padding: 0 }}>
+        <div style={{
+          display: "grid", gridTemplateColumns: semCabecalho ? "2fr 1.3fr 1fr 1fr 1fr" : undefined, gap: 8,
+          padding: semCabecalho ? "12px 16px" : 0, borderBottom: semCabecalho ? `1px solid ${C.line}` : "none",
+        }}>
+          {semCabecalho && ["ALUNO", "CONTATO", "GÊNERO", "STATUS", ""].map((h) => (
+            <div key={h} style={{ color: C.mut, fontSize: 10.5, fontWeight: 800, letterSpacing: 0.5 }}>{h}</div>
+          ))}
+        </div>
+        {filtrados.slice(0, 200).map(({ t, s }) => {
+          const chave = `${t.id}:${s.id}`;
+          const temGenero = s.genero === "M" || s.genero === "F";
+          if (!semCabecalho) {
+            return (
+              <Painel key={chave} onClick={() => abrirEdicao({ t, s })} style={{
+                display: "flex", alignItems: "center", gap: 10, cursor: "pointer", padding: "10px 12px", marginBottom: 6,
+              }}>
+                <Avatar foto={fotos[chave]} nome={s.name} size={32} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
+                    {s.name}
+                    {s.approved === false && <span style={{ color: C.amberSoft, fontSize: 10 }}>⏳ pendente</span>}
+                    {!temGenero && <span style={{ color: C.oak, fontSize: 10 }}>⚧ sem gênero</span>}
+                  </div>
+                  <div style={{ color: C.mut, fontSize: 11 }}>{t.label}{s.phone ? ` · ${fmtPhone(s.phone)}` : ""}</div>
+                </div>
+                <span style={{ color: C.tealSoft, fontSize: 11, fontWeight: 800, flexShrink: 0 }}>EDITAR ›</span>
+              </Painel>
+            );
+          }
+          return (
+            <div key={chave} style={{ display: "grid", gridTemplateColumns: "2fr 1.3fr 1fr 1fr 1fr", gap: 8, padding: "12px 16px", borderBottom: `1px solid ${C.line}`, alignItems: "center", fontSize: 13 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                <Avatar foto={fotos[chave]} nome={s.name} size={30} />
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name}</div>
+                  <div style={{ color: C.mut, fontSize: 10.5 }}>{t.label}</div>
+                </div>
               </div>
-              <div style={{ color: C.mut, fontSize: 11 }}>{t.label}{s.phone ? ` · ${fmtPhone(s.phone)}` : ""}</div>
+              <div style={{ color: C.mut }}>{s.phone ? fmtPhone(s.phone) : "—"}</div>
+              <div>
+                <span style={{
+                  color: temGenero ? C.ok : C.oak, background: C.panelSoft, borderRadius: 6, padding: "3px 9px",
+                  fontSize: 10.5, fontWeight: 800,
+                }}>{temGenero ? (s.genero === "F" ? "Feminino" : "Masculino") : "Não informado"}</span>
+              </div>
+              <div>
+                <span style={{
+                  color: s.approved === false ? C.oak : C.ok, background: C.panelSoft, borderRadius: 6, padding: "3px 9px",
+                  fontSize: 10.5, fontWeight: 800,
+                }}>{s.approved === false ? "Pendente" : "Aprovado"}</span>
+              </div>
+              <div style={{ textAlign: "right" }}>
+                <button onClick={() => abrirEdicao({ t, s })} style={{
+                  ...btnFantasma(), border: `1px solid ${C.line}`, borderRadius: 8, padding: "6px 12px", fontSize: 11.5,
+                }}>Editar</button>
+              </div>
             </div>
-            <span style={{ color: C.tealSoft, fontSize: 11, fontWeight: 800, flexShrink: 0 }}>EDITAR ›</span>
-          </Painel>
-        ))}
+          );
+        })}
         {filtrados.length === 0 && (
-          <Painel><div style={{ color: C.mut, fontSize: 13, textAlign: "center" }}>Nenhum cadastro encontrado.</div></Painel>
+          <div style={{ padding: 24, textAlign: "center", color: C.mut, fontSize: 13 }}>Nenhum cadastro encontrado.</div>
         )}
-        {filtrados.length > 200 && (
-          <div style={{ color: C.mut, fontSize: 11, textAlign: "center", marginTop: 4 }}>Mostrando os primeiros 200 — refine a busca pra achar mais rápido.</div>
-        )}
-      </div>
+      </Painel>
+      {filtrados.length > 200 && (
+        <div style={{ color: C.mut, fontSize: 11, textAlign: "center", marginTop: 8 }}>Mostrando os primeiros 200 — refine a busca pra achar mais rápido.</div>
+      )}
     </>
   );
 }
@@ -4925,6 +5256,13 @@ function TelaGestaoAdmins({ adminsReg, salvarAdmins, allData, fotos, avisar, sem
       {!semCabecalho && <CabecalhoTela titulo="TODOS OS CADASTROS"
         sub="Só você (dona do app) vê esta central. Promova qualquer pessoa, use um papel pronto e ajuste permissão por permissão."
         voltar={voltar} />}
+      {semCabecalho && (
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ color: C.mut, fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 6 }}>PAINEL ADMINISTRATIVO</div>
+          <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: 0.3 }}>Gestão de administradores</div>
+          <div style={{ color: C.mut, fontSize: 13, marginTop: 4 }}>Cadastros, papéis e permissões em um só lugar</div>
+        </div>
+      )}
 
       {/* Promover um aluno existente */}
       <Painel style={{ display: "grid", gap: 8, marginBottom: 14 }}>
