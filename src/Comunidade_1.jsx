@@ -419,6 +419,7 @@ const K_FAVORITOS = "spincycle-comunidade-favoritos-clube";
 const K_RECOLHIDOS = "spincycle-comunidade-recolhidos";
 const K_VISITADOS = "spincycle-comunidade-visitados";
 const K_TERMOS = "spincycle-comunidade-termos-recentes";
+const K_MODO_PAINEL = "spincycle-comunidade-modo-painel"; // "web" | "mobile" — só muda quando a pessoa clica
 
 async function lerShared(key, fallback) {
   try {
@@ -1842,9 +1843,19 @@ export default function App() {
   const [tela, setTela] = useState("inicio");
   const [menuAberto, setMenuAberto] = useState(false);
   const [larga, setLarga] = useState(typeof window !== "undefined" && window.innerWidth >= 900);
+  const [larguraJanela, setLarguraJanela] = useState(typeof window !== "undefined" ? window.innerWidth : 1200);
+  // "web" | "mobile" | null. null = ainda não escolheu → usa a largura da tela como sugestão inicial.
+  // Uma vez escolhido (clicou em "versão mobile" ou "abrir painel completo"), SÓ muda de novo com outro clique —
+  // nem redimensionar a janela, nem dar F5/apertar Enter na barra de endereço muda mais sozinho.
+  const [modoPainelWeb, setModoPainelWeb] = useState(null);
+  const escolherModoPainel = (modo) => { // modo: "web" | "mobile"
+    setModoPainelWeb(modo);
+    if (!demo) gravarLocal(K_MODO_PAINEL, modo);
+  };
+  const mostrarDashboard = modoPainelWeb === "web" || (modoPainelWeb === null && larga);
   const [abaAdminLarga, setAbaAdminLarga] = useState("geral"); // geral | cadastros | clube | admins | missoes
   useEffect(() => {
-    const aoRedimensionar = () => setLarga(window.innerWidth >= 900);
+    const aoRedimensionar = () => { setLarga(window.innerWidth >= 900); setLarguraJanela(window.innerWidth); };
     window.addEventListener("resize", aoRedimensionar);
     return () => window.removeEventListener("resize", aoRedimensionar);
   }, []);
@@ -2024,6 +2035,8 @@ export default function App() {
       } catch { /* segue sem gestor */ }
       const tPref = await lerLocal(K_TEMA);
       if (tPref === "claro" || tPref === "escuro") { aplicarTema(tPref); setTemaSt(tPref); }
+      const modoPref = await lerLocal(K_MODO_PAINEL);
+      if (modoPref === "web" || modoPref === "mobile") setModoPainelWeb(modoPref);
       await carregarLeves();
       setCarregando(false);
       setProntoSessao(true);
@@ -3030,8 +3043,8 @@ export default function App() {
     );
   }
 
-  // ---------- Dashboard largo de admin (telas ≥900px) ----------
-  if (sessao.staff && larga) {
+  // ---------- Dashboard largo de admin (a pessoa que decide, não a largura da tela) ----------
+  if (sessao.staff && mostrarDashboard) {
     const abaBtnLarga = (id, rot, mostra = true) => mostra && (
       <button key={id} onClick={() => setAbaAdminLarga(id)} style={{
         display: "block", width: "100%", textAlign: "left", background: abaAdminLarga === id ? C.panelSoft : "transparent",
@@ -3040,8 +3053,9 @@ export default function App() {
         padding: "11px 16px", cursor: "pointer", fontFamily: "inherit",
       }}>{rot}</button>
     );
+    const podeVerCadastros = adminSuper || !!adminPerms.verKit || !!adminPerms.editarPerfis || !!adminPerms.resetarSenha || !!adminPerms.trocarFotos;
     let painelAtivo;
-    if (abaAdminLarga === "cadastros") {
+    if (abaAdminLarga === "cadastros" && podeVerCadastros) {
       painelAtivo = <PainelCadastrosAlunos allData={allData} fotos={fotos} salvarCadastroAluno={salvarCadastroAluno} avisar={avisar} semCabecalho />;
     } else if (abaAdminLarga === "clube" && clubeAcesso.ver) {
       painelAtivo = <CadastroClube clube={clube} salvarClube={salvarClube} removerParceiro={removerParceiro}
@@ -3094,31 +3108,75 @@ export default function App() {
         profundo={adminSuper || !!adminPerms.painelCompleto} presenca={presenca}
         abrirPerfilAluno={abrirPerfilAluno} irAdmins={null} semCabecalho voltar={() => {}} />;
     }
+    const compacta = larguraJanela < 760; // celular ou janela estreita: barra lateral vira topo
     return (
-      <div style={{ minHeight: "100vh", background: C.bg, color: C.cream, fontFamily: "'Montserrat', sans-serif", display: "flex" }}>
+      <div style={{
+        minHeight: "100vh", background: C.bg, color: C.cream, fontFamily: "'Montserrat', sans-serif",
+        display: "flex", flexDirection: compacta ? "column" : "row",
+      }}>
         <style>{`@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&display=swap'); html,body{margin:0;background:${C.bg};} *{box-sizing:border-box;} button{font-family:inherit;}`}</style>
-        <div style={{ width: 220, flexShrink: 0, borderRight: `1px solid ${C.line}`, minHeight: "100vh", position: "sticky", top: 0, alignSelf: "flex-start", display: "flex", flexDirection: "column" }}>
-          <div style={{ padding: "22px 16px 14px" }}>
-            <div style={{ fontWeight: 800, fontSize: 15, letterSpacing: 0.5 }}>ARENA SPIN</div>
-            <div style={{ color: C.oak, fontSize: 11, fontWeight: 700, marginTop: 2 }}>{sessao.name}</div>
+        <div style={{
+          width: compacta ? "100%" : 220, flexShrink: 0, borderRight: compacta ? "none" : `1px solid ${C.line}`,
+          borderBottom: compacta ? `1px solid ${C.line}` : "none",
+          minHeight: compacta ? "auto" : "100vh", position: compacta ? "static" : "sticky", top: 0,
+          alignSelf: "flex-start", display: "flex", flexDirection: compacta ? "column" : "column",
+        }}>
+          <div style={{ padding: compacta ? "16px 16px 10px" : "22px 16px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <div style={{ fontWeight: 800, fontSize: 15, letterSpacing: 0.5 }}>ARENA SPIN</div>
+              <div style={{ color: C.oak, fontSize: 11, fontWeight: 700, marginTop: 2 }}>{sessao.name}</div>
+            </div>
+            {compacta && (
+              <button onClick={() => escolherModoPainel("mobile")} style={{ ...btnFantasma(), border: `1px solid ${C.line}`, borderRadius: 8, padding: "7px 10px", fontSize: 11 }}>
+                📱 App
+              </button>
+            )}
           </div>
-          <nav style={{ display: "flex", flexDirection: "column", marginTop: 4 }}>
+          <nav style={{
+            display: "flex", flexDirection: compacta ? "row" : "column", marginTop: 4,
+            overflowX: compacta ? "auto" : "visible", WebkitOverflowScrolling: "touch",
+          }}>
             {abaBtnLarga("geral", "📊 Visão geral")}
-            {abaBtnLarga("cadastros", "👤 Cadastros de alunos")}
+            {abaBtnLarga("cadastros", "👤 Cadastros de alunos", podeVerCadastros)}
             {abaBtnLarga("clube", "🎟️ Clube Spincycle", clubeAcesso.ver)}
             {abaBtnLarga("missoes", "🐻 Missões & Arena")}
             {abaBtnLarga("admins", "🔑 Gestão de admins", adminSuper)}
           </nav>
-          <div style={{ marginTop: "auto", padding: 16, display: "grid", gap: 8 }}>
-            <button onClick={() => setLarga(false)} style={{ ...btnFantasma(), border: `1px solid ${C.line}`, borderRadius: 8, padding: "8px", fontSize: 11.5 }}>
-              📱 Ver versão mobile
-            </button>
-            <button onClick={sair} style={{ ...btnFantasma(), color: "#E08585", fontSize: 11.5, textAlign: "left", padding: "4px 4px" }}>
-              Sair da conta
+          {!compacta && (
+            <div style={{ marginTop: "auto", padding: 16, display: "grid", gap: 8 }}>
+              <div style={{ display: "flex", gap: 6 }}>
+                {["escuro", "claro"].map((t) => (
+                  <button key={t} onClick={() => mudarTema(t)} style={{
+                    flex: 1, background: tema === t ? C.teal : "transparent",
+                    color: tema === t ? "#F2F2F2" : C.mut, border: `1px solid ${tema === t ? C.teal : C.line}`,
+                    borderRadius: 8, padding: "7px 6px", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+                  }}>{t === "escuro" ? "🌙 Escuro" : "☀️ Claro"}</button>
+                ))}
+              </div>
+              <button onClick={() => escolherModoPainel("mobile")} style={{ ...btnFantasma(), border: `1px solid ${C.line}`, borderRadius: 8, padding: "8px", fontSize: 11.5 }}>
+                📱 Ver versão mobile
+              </button>
+              <button onClick={sair} style={{ ...btnFantasma(), color: "#E08585", fontSize: 11.5, textAlign: "left", padding: "4px 4px" }}>
+                Sair da conta
+              </button>
+            </div>
+          )}
+        </div>
+        {compacta && (
+          <div style={{ display: "flex", gap: 6, padding: "8px 16px", borderBottom: `1px solid ${C.line}` }}>
+            {["escuro", "claro"].map((t) => (
+              <button key={t} onClick={() => mudarTema(t)} style={{
+                flex: 1, background: tema === t ? C.teal : "transparent",
+                color: tema === t ? "#F2F2F2" : C.mut, border: `1px solid ${tema === t ? C.teal : C.line}`,
+                borderRadius: 8, padding: "7px 6px", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+              }}>{t === "escuro" ? "🌙 Escuro" : "☀️ Claro"}</button>
+            ))}
+            <button onClick={sair} style={{ ...btnFantasma(), color: "#E08585", fontSize: 11, padding: "7px 10px", border: `1px solid ${C.line}`, borderRadius: 8 }}>
+              Sair
             </button>
           </div>
-        </div>
-        <div style={{ flex: 1, minWidth: 0, padding: "28px 36px", maxWidth: 1200 }}>
+        )}
+        <div style={{ flex: 1, minWidth: 0, padding: compacta ? "18px 16px" : "28px 36px", maxWidth: compacta ? "100%" : 1200 }}>
           {painelAtivo}
         </div>
         <Toast msg={msg} />
@@ -3471,11 +3529,22 @@ export default function App() {
   );
 
   const telaPainel = (
-    <TelaPainelAdm metricas={metricas} clube={clube} fotos={fotos} allData={allData}
-      muralAlunos={muralAlunos} reacts={reacts} comentarios={comentarios}
-      profundo={adminSuper || !!adminPerms.painelCompleto} presenca={presenca}
-      irAdmins={adminSuper ? () => setTela("gestaoAdmins") : null}
-      abrirPerfilAluno={abrirPerfilAluno} voltar={() => setTela("inicio")} />
+    <>
+      {(adminSuper || !!adminPerms.painelCompleto) && (
+        <button onClick={() => escolherModoPainel("web")} style={{
+          ...btnFantasma(), border: `1px solid ${C.oak}66`, borderRadius: 10, padding: "12px 14px",
+          fontSize: 12.5, marginBottom: 10, textAlign: "left", display: "flex", alignItems: "center",
+          justifyContent: "space-between", width: "100%",
+        }}>
+          <span>🖥️ Abrir versão completa (dashboard)</span><span style={{ color: C.mut }}>›</span>
+        </button>
+      )}
+      <TelaPainelAdm metricas={metricas} clube={clube} fotos={fotos} allData={allData}
+        muralAlunos={muralAlunos} reacts={reacts} comentarios={comentarios}
+        profundo={adminSuper || !!adminPerms.painelCompleto} presenca={presenca}
+        irAdmins={adminSuper ? () => setTela("gestaoAdmins") : null}
+        abrirPerfilAluno={abrirPerfilAluno} voltar={() => setTela("inicio")} />
+    </>
   );
 
   const telaGestaoAdmins = adminSuper ? (
