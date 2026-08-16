@@ -373,6 +373,45 @@ function computeProgress(student, targets) {
 // ---------- Persistência ----------
 const KEY_DESAFIO = (track) => `spincycle-desafio-shared-v2-${track}`;
 const KEY_DESAFIO_GLOBAL = "spincycle-desafio-shared-v2-global";
+
+// 🌐 Filtro multi-unidade: o cadastro de alunos é uma base ÚNICA e compartilhada
+// (sem separação por unidade no nível de armazenamento). A separação é feita aqui,
+// por um campo `unidade` no próprio aluno. Quem ainda não tem esse campo (cadastros
+// antigos, de antes dessa função existir) é tratado como pertencente à unidade
+// ATUAL do deploy — assim ninguém "some" do histórico por falta do campo.
+const ID_GLOBAL = "global";
+// 🏢 Rede de unidades — cadastro inicial (a partir daqui, novas unidades entram
+// pelo painel, aba "Unidades"). Ordem alfabética.
+const UNIDADES_PADRAO = [
+  { id: "asa-norte", nome: "Spincycle Asa Norte", cidade: "Brasília · DF", whats: "" },
+  { id: "asa-sul", nome: "Spincycle Asa Sul", cidade: "Brasília · DF", whats: "" },
+  { id: "campinas", nome: "Spincycle Campinas", cidade: "Campinas · SP", whats: "" },
+  { id: "curitiba", nome: "Spincycle Curitiba", cidade: "Curitiba · PR", whats: "" },
+  { id: "goiania", nome: "Spincycle Goiânia", cidade: "Goiânia · GO", whats: "" },
+  { id: "itaim", nome: "Spincycle Itaim", cidade: "São Paulo · SP", whats: "" },
+  { id: "jundiai", nome: "Spincycle Jundiaí", cidade: "Jundiaí · SP", whats: "" },
+  { id: "novo-hamburgo", nome: "Spincycle Novo Hamburgo", cidade: "Novo Hamburgo · RS", whats: "" },
+  { id: "paulista", nome: "Spincycle Paulista", cidade: "São Paulo · SP", whats: "" },
+  { id: "prudente", nome: "Spincycle Prudente", cidade: "Presidente Prudente · SP", whats: "" },
+  { id: "rio-de-janeiro", nome: "Spincycle Rio de Janeiro", cidade: "Rio de Janeiro · RJ", whats: "" },
+];
+function alunoPertenceUnidade(s, unidadeFiltro) {
+  if (unidadeFiltro === ID_GLOBAL) return true;
+  return (s.unidade || UNIDADE) === unidadeFiltro;
+}
+function filtrarPorUnidade(allData, metricas, unidadeFiltro) {
+  if (unidadeFiltro === ID_GLOBAL) return { allData, metricas };
+  const allDataF = {};
+  const chavesOk = new Set();
+  TRACKS.forEach((t) => {
+    const d = allData[t.id] || { students: [] };
+    const studentsF = (d.students || []).filter((s) => alunoPertenceUnidade(s, unidadeFiltro));
+    allDataF[t.id] = { ...d, students: studentsF };
+    studentsF.forEach((s) => chavesOk.add(`${t.id}:${s.id}`));
+  });
+  const metricasF = { ...metricas, alunos: Object.fromEntries(Object.entries(metricas.alunos || {}).filter(([chave]) => chavesOk.has(chave))) };
+  return { allData: allDataF, metricas: metricasF };
+}
 const KEY_FOTOS = (track) => `spincycle-desafio-shared-v2-fotos-${track}`;
 const K = {
   config: `spincycle-comunidade-v1-${UNIDADE}-config`,
@@ -420,6 +459,10 @@ const K_RECOLHIDOS = "spincycle-comunidade-recolhidos";
 const K_VISITADOS = "spincycle-comunidade-visitados";
 const K_TERMOS = "spincycle-comunidade-termos-recentes";
 const K_MODO_PAINEL = "spincycle-comunidade-modo-painel"; // "web" | "mobile" — só muda quando a pessoa clica
+// 🌐 Registro central das unidades da rede — SEM prefixo de unidade, então é o mesmo
+// pra quem acessa por qualquer domínio (prudente, paulista, etc). É aqui que a Visão
+// Global consulta "quais unidades existem" e é aqui que o seletor de unidade se baseia.
+const K_UNIDADES_REDE = "spincycle-comunidade-v1-unidades-rede";
 
 async function lerShared(key, fallback) {
   try {
@@ -1604,7 +1647,7 @@ function PostCard({ e, fotos, reacts, minhaChave, reagir, onApagar, onAutor, sel
   comentarios = [], onComentar, onApagarComentario, podeApagarComentario, onVerQuem, onLido, extraInfo }) {
   const ehPostDePessoa = !!e.autorNome;
   const campanha = e.tipo === "campanha";
-  const foto = campanha ? (e.logo || null) : (e.autorChave ? fotos[e.autorChave] : null);
+  const foto = campanha ? (e.logo || null) : null; // 🚫 foto pessoal removida do feed (mantém o logo do parceiro em campanhas)
   const oficial = e.tipo === "oficial";
   const clicavel = onAutor ? { cursor: "pointer" } : {};
   const [abrirResp, setAbrirResp] = useState(false);
@@ -1849,6 +1892,7 @@ export default function App() {
   // nem redimensionar a janela, nem dar F5/apertar Enter na barra de endereço muda mais sozinho.
   const [modoPainelWeb, setModoPainelWeb] = useState(null);
   const [seletorUnidadeAberto, setSeletorUnidadeAberto] = useState(false);
+  const [unidadeFiltro, setUnidadeFiltro] = useState(UNIDADE); // id de uma unidade, ou ID_GLOBAL
   const escolherModoPainel = (modo) => { // modo: "web" | "mobile"
     setModoPainelWeb(modo);
     if (!demo) gravarLocal(K_MODO_PAINEL, modo);
@@ -1899,6 +1943,7 @@ export default function App() {
   const [agenda, setAgenda] = useState({ eventos: [] });
   const [lembretes, setLembretes] = useState([]);
   const [config, setConfig] = useState(CONFIG_PADRAO);
+  const [unidadesRede, setUnidadesRede] = useState(UNIDADES_PADRAO);
   const [carregando, setCarregando] = useState(true);
   const [admin, setAdmin] = useState(false);
   const [gestorClube, setGestorClube] = useState(false);
@@ -1919,7 +1964,7 @@ export default function App() {
 
   const carregarLeves = async () => {
     if (demoRef.current) return;
-    const [il, pc, ps, gg, ma, rc, pf, ag, cb, cf, bs, mt, adr, prs, tc, cm, it, rd, g175, p4, relp, ind, eq, gap] = await Promise.all([
+    const [il, pc, ps, gg, ma, rc, pf, ag, cb, cf, bs, mt, adr, prs, tc, cm, it, rd, g175, p4, relp, ind, eq, gap, udr] = await Promise.all([
       lerShared(KEY_DESAFIO("ilimitado"), { students: [] }),
       lerShared(KEY_DESAFIO("pacote"), { students: [] }),
       lerShared(KEY_DESAFIO("passe"), { students: [] }),
@@ -1944,6 +1989,7 @@ export default function App() {
       lerShared(K.indicacoes, {}),
       lerShared(K.equipe, {}),
       lerShared(K.gestaoApp, {}),
+      lerShared(K_UNIDADES_REDE, null),
     ]);
     if (il !== undefined || pc !== undefined || ps !== undefined) {
       setAllData({
@@ -1959,6 +2005,16 @@ export default function App() {
     if (ag !== undefined) setAgenda(ag || { eventos: [] });
     if (cb !== undefined) setClube(cb || { parceiros: [] });
     if (cf !== undefined) setConfig(cf || CONFIG_PADRAO);
+    if (udr !== undefined) {
+      if (Array.isArray(udr) && udr.length) {
+        setUnidadesRede(udr);
+      } else if (!demoRef.current) {
+        // Ninguém salvou a lista de unidades ainda: semeia com a lista padrão,
+        // gravando de verdade pra virar o registro oficial dali pra frente.
+        setUnidadesRede(UNIDADES_PADRAO);
+        gravarShared(K_UNIDADES_REDE, UNIDADES_PADRAO).catch(() => {});
+      }
+    }
     if (bs !== undefined) setBuscas(bs || {});
     if (mt !== undefined) setMetricas(mt || { alunos: {}, parceiros: {}, campanhas: {} });
     if (adr !== undefined) setAdminsReg(Array.isArray(adr) ? adr : []);
@@ -2304,6 +2360,29 @@ export default function App() {
     try {
       await gravarShared(K.admins, novo);
       setAdminsReg(novo);
+      if (msg) avisar(msg);
+    } catch { avisar("⚠️ Falha ao salvar."); }
+  };
+
+  // 🌐 Unidades da rede — registro central (chave sem prefixo de unidade, visível
+  // de qualquer deploy). Segue o mesmo protocolo: GET fresco → -bak → PUT.
+  const salvarUnidadesRede = async (transforma, msg) => {
+    const aplicarT = (base) => {
+      const lista = Array.isArray(base) && base.length ? JSON.parse(JSON.stringify(base)) : [...UNIDADES_PADRAO];
+      return transforma(lista);
+    };
+    if (demo) {
+      const novo = aplicarT(unidadesRede);
+      if (novo) { setUnidadesRede(novo); if (msg) avisar(msg); }
+      return;
+    }
+    const base = await lerShared(K_UNIDADES_REDE, [...UNIDADES_PADRAO]);
+    if (base === undefined) { avisar("⚠️ Sem conexão — nada foi salvo."); return; }
+    const novo = aplicarT(base);
+    if (!novo) return;
+    try {
+      await gravarShared(K_UNIDADES_REDE, novo);
+      setUnidadesRede(novo);
       if (msg) avisar(msg);
     } catch { avisar("⚠️ Falha ao salvar."); }
   };
@@ -3055,9 +3134,12 @@ export default function App() {
       }}>{rot}</button>
     );
     const podeVerCadastros = adminSuper || !!adminPerms.verKit || !!adminPerms.editarPerfis || !!adminPerms.resetarSenha || !!adminPerms.trocarFotos;
+    const { allData: allDataUn, metricas: metricasUn } = filtrarPorUnidade(allData, metricas, unidadeFiltro);
     let painelAtivo;
     if (abaAdminLarga === "cadastros" && podeVerCadastros) {
-      painelAtivo = <PainelCadastrosAlunos allData={allData} fotos={fotos} salvarCadastroAluno={salvarCadastroAluno} avisar={avisar} semCabecalho />;
+      painelAtivo = <PainelCadastrosAlunos allData={allDataUn} fotos={fotos} salvarCadastroAluno={salvarCadastroAluno} avisar={avisar} semCabecalho unidadesRede={unidadesRede} />;
+    } else if (abaAdminLarga === "unidades" && adminSuper) {
+      painelAtivo = <PainelUnidades unidadesRede={unidadesRede} salvarUnidadesRede={salvarUnidadesRede} allData={allData} semCabecalho />;
     } else if (abaAdminLarga === "clube" && clubeAcesso.ver) {
       painelAtivo = <CadastroClube clube={clube} salvarClube={salvarClube} removerParceiro={removerParceiro}
         lancarCampanha={lancarCampanha} metricas={metricas} acesso={clubeAcesso} semCabecalho voltar={() => {}} />;
@@ -3065,7 +3147,7 @@ export default function App() {
       painelAtivo = <TelaGestaoAdmins adminsReg={adminsReg} salvarAdmins={salvarAdmins} allData={allData} fotos={fotos} avisar={avisar} semCabecalho voltar={() => {}} />;
     } else if (abaAdminLarga === "missoes") {
       const linhas = TRACKS.map((t) => {
-        const alunosTrack = ((allData[t.id] || {}).students || []);
+        const alunosTrack = ((allDataUn[t.id] || {}).students || []);
         const comProgresso = alunosTrack.filter((s) => (s.records || []).length > 0 || (s.guests || []).length > 0);
         const cartelaCheia = comProgresso.filter((s) => computeProgress(s, t.targets).full).length;
         const ranking = [...comProgresso]
@@ -3142,7 +3224,7 @@ export default function App() {
         </div>
       );
     } else {
-      painelAtivo = <TelaPainelAdm metricas={metricas} clube={clube} fotos={fotos} allData={allData}
+      painelAtivo = <TelaPainelAdm metricas={metricasUn} clube={clube} fotos={fotos} allData={allDataUn}
         muralAlunos={muralAlunos} reacts={reacts} comentarios={comentarios}
         profundo={adminSuper || !!adminPerms.painelCompleto} presenca={presenca}
         abrirPerfilAluno={abrirPerfilAluno} irAdmins={null} semCabecalho voltar={() => {}}
@@ -3170,14 +3252,15 @@ export default function App() {
               <div style={{ color: C.oak, fontSize: 11, fontWeight: 700, marginTop: 2 }}>{sessao.name}</div>
             </div>
             {compacta && (
-              <button onClick={() => escolherModoPainel("mobile")} style={{ ...btnFantasma(), border: `1px solid ${C.line}`, borderRadius: 8, padding: "7px 10px", fontSize: 11 }}>
+              <button onClick={() => { escolherModoPainel("mobile"); setTela("painel"); }} style={{ ...btnFantasma(), border: `1px solid ${C.line}`, borderRadius: 8, padding: "7px 10px", fontSize: 11 }}>
                 📱 App
               </button>
             )}
           </div>
           {(() => {
-            const unidades = config.unidades || [];
-            const atual = unidades.find((u) => u.id === UNIDADE) || { id: UNIDADE, nome: UNIDADE_NOME, cidade: "" };
+            const atual = unidadeFiltro === ID_GLOBAL
+              ? { nome: "🌐 Global (todas as unidades)" }
+              : (unidadesRede.find((u) => u.id === unidadeFiltro) || { id: unidadeFiltro, nome: UNIDADE_NOME });
             return (
               <div style={{ position: "relative", padding: compacta ? "0 16px 10px" : "0 16px 14px" }}>
                 <div onClick={() => setSeletorUnidadeAberto(!seletorUnidadeAberto)} style={{
@@ -3194,25 +3277,33 @@ export default function App() {
                   <div style={{
                     position: "absolute", top: "calc(100% + 4px)", left: 16, right: 16, zIndex: 50,
                     background: C.panel, border: `1px solid ${C.line}`, borderRadius: 10,
-                    boxShadow: "0 12px 32px rgba(0,0,0,.3)", maxHeight: 260, overflowY: "auto", padding: 6,
+                    boxShadow: "0 12px 32px rgba(0,0,0,.3)", maxHeight: 300, overflowY: "auto", padding: 6,
                   }}>
-                    {unidades.map((u) => (
-                      <div key={u.id} onClick={() => {
-                        setSeletorUnidadeAberto(false);
-                        if (u.id !== UNIDADE) avisar("🚧 Essa unidade ainda não tem o Comunidade implantado — os dados aqui continuam sendo só da " + UNIDADE_NOME + ".");
-                      }} style={{
+                    <div onClick={() => { setUnidadeFiltro(ID_GLOBAL); setSeletorUnidadeAberto(false); }} style={{
+                      padding: "8px 9px", borderRadius: 8, cursor: "pointer", fontSize: 12.5, fontWeight: 700, marginBottom: 4,
+                      color: unidadeFiltro === ID_GLOBAL ? C.cream : C.tealSoft,
+                      background: unidadeFiltro === ID_GLOBAL ? C.panelSoft : "transparent",
+                    }}>
+                      🌐 Global (todas as unidades)
+                    </div>
+                    <div style={{ height: 1, background: C.line, margin: "4px 6px" }} />
+                    {unidadesRede.map((u) => (
+                      <div key={u.id} onClick={() => { setUnidadeFiltro(u.id); setSeletorUnidadeAberto(false); }} style={{
                         padding: "8px 9px", borderRadius: 8, cursor: "pointer", fontSize: 12.5,
-                        fontWeight: u.id === UNIDADE ? 700 : 600,
-                        color: u.id === UNIDADE ? C.cream : C.mut,
-                        background: u.id === UNIDADE ? C.panelSoft : "transparent",
+                        fontWeight: u.id === unidadeFiltro ? 700 : 600,
+                        color: u.id === unidadeFiltro ? C.cream : C.mut,
+                        background: u.id === unidadeFiltro ? C.panelSoft : "transparent",
                       }}>
                         {u.nome}
                         {u.cidade && <div style={{ fontSize: 10.5, color: C.mut, fontWeight: 500 }}>{u.cidade}</div>}
                       </div>
                     ))}
-                    <div style={{ color: C.mut, fontSize: 10, padding: "6px 9px 2px", lineHeight: 1.4 }}>
-                      Outras unidades entram aqui conforme forem implantadas.
-                    </div>
+                    {adminSuper && (
+                      <button onClick={() => { setSeletorUnidadeAberto(false); setAbaAdminLarga("unidades"); }} style={{
+                        width: "100%", textAlign: "left", background: "transparent", border: "none", cursor: "pointer",
+                        color: C.oak, fontWeight: 700, fontSize: 11.5, padding: "8px 9px", fontFamily: "inherit",
+                      }}>＋ Cadastrar nova unidade</button>
+                    )}
                   </div>
                 )}
               </div>
@@ -3227,6 +3318,7 @@ export default function App() {
             {abaBtnLarga("clube", "🎟️ Clube Spincycle", clubeAcesso.ver)}
             {abaBtnLarga("missoes", "🐻 Missões & Arena")}
             {abaBtnLarga("admins", "🔑 Gestão de admins", adminSuper)}
+            {abaBtnLarga("unidades", "🏢 Unidades", adminSuper)}
           </nav>
           {!compacta && (
             <div style={{ marginTop: "auto", padding: 16, display: "grid", gap: 8 }}>
@@ -3239,7 +3331,7 @@ export default function App() {
                   }}>{t === "escuro" ? "🌙 Escuro" : "☀️ Claro"}</button>
                 ))}
               </div>
-              <button onClick={() => escolherModoPainel("mobile")} style={{ ...btnFantasma(), border: `1px solid ${C.line}`, borderRadius: 8, padding: "8px", fontSize: 11.5 }}>
+              <button onClick={() => { escolherModoPainel("mobile"); setTela("painel"); }} style={{ ...btnFantasma(), border: `1px solid ${C.line}`, borderRadius: 8, padding: "8px", fontSize: 11.5 }}>
                 📱 Ver versão mobile
               </button>
               <button onClick={sair} style={{ ...btnFantasma(), color: "#E08585", fontSize: 11.5, textAlign: "left", padding: "4px 4px" }}>
@@ -4438,7 +4530,7 @@ function TelaPerfilAluno({ track, sid, allData, perfis, fotos, muralVisivel, fee
 
       {/* Cabeçalho no formato da home: foto à esquerda, nome + bio à direita */}
       <div style={{ display: "flex", gap: 16, alignItems: "flex-start", marginTop: 8 }}>
-        <Avatar foto={foto} nome={aluno.name} size={92} />
+        <Avatar foto={null} nome={aluno.name} size={92} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <span style={{ fontWeight: 800, fontSize: 20, letterSpacing: 0.5, textTransform: "uppercase", lineHeight: 1.15 }}>
@@ -5038,7 +5130,114 @@ function TelaPainelAdm({ metricas, clube, fotos, allData, muralAlunos, reacts, c
 }
 
 // ---------- Central de cadastros e permissões (só a dona do app) ----------
-function PainelCadastrosAlunos({ allData, fotos, salvarCadastroAluno, avisar, semCabecalho, voltar }) {
+// ---------- Unidades da rede (só a dona) — cadastro manual, registro central ----------
+function slugify(txt) {
+  return (txt || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+function PainelUnidades({ unidadesRede, salvarUnidadesRede, allData, semCabecalho, voltar }) {
+  const vazio = { nome: "", cidade: "", whats: "" };
+  const [form, setForm] = useState(null); // null = lista; objeto = criando/editando
+  const [confirmarRemover, setConfirmarRemover] = useState(null);
+
+  const contagemAlunos = (id) => {
+    let n = 0;
+    TRACKS.forEach((t) => ((allData[t.id] || {}).students || []).forEach((s) => {
+      if ((s.unidade || UNIDADE) === id) n += 1;
+    }));
+    return n;
+  };
+
+  const salvar = () => {
+    const nome = form.nome.trim();
+    if (!nome) return;
+    const id = form.id || slugify(nome) || `unidade-${Date.now()}`;
+    salvarUnidadesRede((lista) => {
+      const i = lista.findIndex((u) => u.id === id);
+      const dados = { id, nome, cidade: form.cidade.trim(), whats: form.whats.trim() };
+      if (i >= 0) lista[i] = { ...lista[i], ...dados };
+      else lista.push(dados);
+      return lista;
+    }, form.id ? "💾 Unidade atualizada!" : "🏢 Unidade cadastrada!");
+    setForm(null);
+  };
+
+  const remover = (id) => {
+    const qtd = contagemAlunos(id);
+    if (qtd > 0) {
+      setConfirmarRemover(null);
+      return; // trava: não deixa remover unidade com alunos vinculados
+    }
+    salvarUnidadesRede((lista) => lista.filter((u) => u.id !== id), "🗑 Unidade removida.");
+    setConfirmarRemover(null);
+  };
+
+  return (
+    <>
+      {!semCabecalho && <CabecalhoTela titulo="UNIDADES DA REDE" sub="Cadastre cada Spincycle aqui. Isso é o que alimenta o seletor de unidade do painel e a opção de unidade no cadastro de aluno." voltar={voltar} />}
+      {semCabecalho && (
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ color: C.mut, fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 6 }}>PAINEL ADMINISTRATIVO</div>
+          <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: 0.3 }}>Unidades da rede</div>
+          <div style={{ color: C.mut, fontSize: 13, marginTop: 4 }}>Cadastre cada Spincycle aqui — alimenta o seletor de unidade e o cadastro de aluno.</div>
+        </div>
+      )}
+
+      {!form ? (
+        <>
+          <button style={{ ...btnPrimario(), marginBottom: 14 }} onClick={() => setForm({ ...vazio })}>+ NOVA UNIDADE</button>
+          <div style={{ display: "grid", gap: 8 }}>
+            {unidadesRede.map((u) => {
+              const qtd = contagemAlunos(u.id);
+              return (
+                <Painel key={u.id} style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                  <div style={{
+                    width: 40, height: 40, borderRadius: 8, background: C.panelSoft, display: "flex",
+                    alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 18,
+                  }}>🏢</div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, fontSize: 13.5 }}>{u.nome} {u.id === UNIDADE && <span style={{ color: C.oak, fontSize: 10.5 }}>· esta unidade (deploy atual)</span>}</div>
+                    <div style={{ color: C.mut, fontSize: 11.5 }}>
+                      {u.cidade || "sem cidade cadastrada"} · <b style={{ color: C.tealSoft }}>{qtd}</b> aluno{qtd === 1 ? "" : "s"} vinculado{qtd === 1 ? "" : "s"}
+                    </div>
+                  </div>
+                  <button style={{ ...btnFantasma(), fontSize: 12 }} onClick={() => setForm({ id: u.id, nome: u.nome, cidade: u.cidade || "", whats: u.whats || "" })}>✏️</button>
+                  {confirmarRemover === u.id ? (
+                    <div style={{ display: "flex", gap: 4 }}>
+                      <button style={{ ...btnFantasma(), color: "#E08585", fontSize: 11 }} onClick={() => remover(u.id)}>Confirmar</button>
+                      <button style={{ ...btnFantasma(), color: C.mut, fontSize: 11 }} onClick={() => setConfirmarRemover(null)}>Cancelar</button>
+                    </div>
+                  ) : (
+                    <button style={{ background: "transparent", border: "none", color: C.mut, cursor: "pointer" }} onClick={() => setConfirmarRemover(u.id)}>🗑</button>
+                  )}
+                </Painel>
+              );
+            })}
+          </div>
+          <div style={{ color: C.mut, fontSize: 10.5, marginTop: 14, lineHeight: 1.5 }}>
+            ⚠️ Uma unidade com alunos vinculados não pode ser removida — só editada. Cada unidade nova aparece automaticamente no seletor do painel e no cadastro de aluno.
+          </div>
+        </>
+      ) : (
+        <Painel style={{ display: "grid", gap: 10 }}>
+          <div style={{ fontWeight: 800, color: C.oak, fontSize: 14 }}>{form.id ? "✏️ Editar unidade" : "🏢 Nova unidade"}</div>
+          <input style={inputStyle()} placeholder="Nome (ex.: Spincycle Paulista)" value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} />
+          <input style={inputStyle()} placeholder="Cidade (ex.: São Paulo · SP)" value={form.cidade} onChange={(e) => setForm({ ...form, cidade: e.target.value })} />
+          <input style={inputStyle()} placeholder="WhatsApp de contato (opcional)" value={form.whats} onChange={(e) => setForm({ ...form, whats: e.target.value.replace(/\D/g, "") })} />
+          {!form.id && form.nome.trim() && (
+            <div style={{ color: C.mut, fontSize: 11 }}>Identificador interno: <b style={{ color: C.tealSoft }}>{slugify(form.nome) || "—"}</b></div>
+          )}
+          <div style={{ display: "flex", gap: 8 }}>
+            <button style={{ ...btnFantasma(), flex: 1, color: C.mut }} onClick={() => setForm(null)}>Cancelar</button>
+            <button style={{ ...btnPrimario(), flex: 2 }} onClick={salvar}>SALVAR</button>
+          </div>
+        </Painel>
+      )}
+    </>
+  );
+}
+
+function PainelCadastrosAlunos({ allData, fotos, salvarCadastroAluno, avisar, semCabecalho, voltar, unidadesRede }) {
   const [q, setQ] = useState("");
   const [filtro, setFiltro] = useState("todos"); // todos | semGenero | pendentes | aprovados
   const [editando, setEditando] = useState(null); // { track, id, name, phone, genero, pass, approved }
@@ -5066,13 +5265,14 @@ function PainelCadastrosAlunos({ allData, fotos, salvarCadastroAluno, avisar, se
   const abrirEdicao = ({ t, s }) => setEditando({
     track: t.id, id: s.id, name: s.name, phone: s.phone ? normPhone(s.phone) : "",
     genero: s.genero === "M" || s.genero === "F" ? s.genero : "", pass: "", approved: s.approved !== false,
+    unidade: s.unidade || UNIDADE,
   });
 
   const salvar = async () => {
     if (!editando) return;
     const nome = editando.name.trim();
     if (!nome) { avisar && avisar("Digite um nome."); return; }
-    const patch = { name: nome, approved: editando.approved };
+    const patch = { name: nome, approved: editando.approved, unidade: editando.unidade || UNIDADE };
     if (editando.phone.trim()) patch.phone = normPhone(editando.phone);
     if (editando.genero === "M" || editando.genero === "F") patch.genero = editando.genero;
     if (editando.pass.trim()) patch.pass = editando.pass.trim();
@@ -5132,6 +5332,15 @@ function PainelCadastrosAlunos({ allData, fotos, salvarCadastroAluno, avisar, se
                 borderRadius: 10, padding: "8px 0", fontWeight: 800, cursor: "pointer", fontSize: 12, fontFamily: "inherit",
               }}>{rot}</button>
             ))}
+          </div>
+          <div>
+            <div style={{ color: C.oak, fontSize: 11.5, fontWeight: 800, letterSpacing: 0.4, marginBottom: 6 }}>UNIDADE</div>
+            <select value={editando.unidade} onChange={(e) => setEditando({ ...editando, unidade: e.target.value })}
+              style={{ ...inputStyle(), appearance: "auto" }}>
+              {(unidadesRede || [{ id: UNIDADE, nome: UNIDADE_NOME }]).map((u) => (
+                <option key={u.id} value={u.id}>{u.nome}</option>
+              ))}
+            </select>
           </div>
           <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12.5, cursor: "pointer" }}>
             <input type="checkbox" checked={editando.approved} onChange={(e) => setEditando({ ...editando, approved: e.target.checked })} />
