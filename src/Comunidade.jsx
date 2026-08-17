@@ -437,6 +437,7 @@ const K = {
 };
 
 // Regras do programa "Indicar um Amigo" — ticket dourado a cada indicação confirmada.
+const TEXTO_INDICACAO_PADRAO = "Aqui você indica um amigo, ele ganha e você ganha. Ele ganha 2 aulas bônus a cada 10 aulas compradas, e você acumula tickets rumo a esses prêmios:";
 const METAS_INDICACAO = [
   { qtd: 5, premio: "1 camiseta" },
   { qtd: 10, premio: "bolsinha Spin" },
@@ -460,17 +461,6 @@ const K_VISITADOS = "spincycle-comunidade-visitados";
 const K_TERMOS = "spincycle-comunidade-termos-recentes";
 const K_ULTIMA_VISITA_NOTIF = "spincycle-comunidade-ultima-visita-notif"; // por aparelho — marca "lido até aqui"
 const K_MODO_PAINEL = "spincycle-comunidade-modo-painel"; // "web" | "mobile" — só muda quando a pessoa clica
-const K_ORDEM_PAINEL = "spincycle-comunidade-ordem-painel-web"; // por aparelho — ordem/visibilidade dos blocos da Visão geral (dashboard)
-const BLOCOS_PAINEL_DEF = [
-  { id: "impacto", titulo: "🏟️ IMPACTO DO DESAFIO" },
-  { id: "clube", titulo: "🎟️ USO DO CLUBE" },
-  { id: "parceiros", titulo: "🏪 PARCEIROS" },
-  { id: "atencao", titulo: "⚠️ ATENÇÃO AGORA" },
-  { id: "campanhas", titulo: "📣 CAMPANHAS NO FEED" },
-  { id: "rapidas", titulo: "＋ AÇÕES RÁPIDAS" },
-  { id: "pulso", titulo: "↗ PULSO DA COMUNIDADE" },
-  { id: "alunos", titulo: "👥 ALUNOS" },
-];
 // 🌐 Registro central das unidades da rede — SEM prefixo de unidade, então é o mesmo
 // pra quem acessa por qualquer domínio (prudente, paulista, etc). É aqui que a Visão
 // Global consulta "quais unidades existem" e é aqui que o seletor de unidade se baseia.
@@ -540,6 +530,7 @@ const CONFIG_PADRAO = {
   ],
   metasIndicacao: null, // null = usa METAS_INDICACAO padrão. Editável pela dona no Painel Web, aba Indicações.
   totalTicketsIndicacao: null, // null = usa TOTAL_TICKETS_INDICACAO padrão.
+  textoIndicacao: null, // null = usa TEXTO_INDICACAO_PADRAO. Editável pela dona no Painel Web, aba Programa de Indicação.
 };
 
 // ---------- QR de demonstração (padrão determinístico a partir do código) ----------
@@ -1976,7 +1967,7 @@ export default function App() {
   const [adminInfo, setAdminInfo] = useState(null); // { usuario, super, perms, unidade }
   const [adminsReg, setAdminsReg] = useState([]);   // admins cadastrados pela dona
   const [presenca, setPresenca] = useState({});     // { chave: ts } — batimento de quem está online
-  const metrBuf = useRef({ entradas: 0, min: 0, telas: {}, parceiros: {}, sujo: false });
+  const metrBuf = useRef({ entradas: 0, min: 0, telas: {}, telasMin: {}, parceiros: {}, sujo: false });
   const [torcida, setTorcida] = useState({});      // { chaveAlvo: [chaveTorcedor, ...] }
   const [comentarios, setComentarios] = useState({}); // { postId: [{id, ts, texto, autorNome, autorChave}] }
   const [verReacoes, setVerReacoes] = useState(null); // postId do modal "quem reagiu"
@@ -2389,22 +2380,27 @@ export default function App() {
 
   const sessaoRef = useRef(null);
   useEffect(() => { sessaoRef.current = sessao; }, [sessao]);
+  const telaRef = useRef(null);
+  useEffect(() => { telaRef.current = tela; }, [tela]);
   const descarregarMetricas = async () => {
     const b = metrBuf.current;
     const s = sessaoRef.current;
     if (!s || s.staff || !b.sujo) return;
     b.min += 2; // intervalo do flush ≈ tempo ativo aproximado
+    if (telaRef.current) b.telasMin[telaRef.current] = (b.telasMin[telaRef.current] || 0) + 2; // tempo aproximado por página (Comportamento)
     const meu = `${s.track}:${s.sid}`;
     const aplicar = (base) => {
       const novo = JSON.parse(JSON.stringify(base || { alunos: {}, parceiros: {} }));
       if (!novo.alunos) novo.alunos = {};
       if (!novo.parceiros) novo.parceiros = {};
-      const a = novo.alunos[meu] || { entradas: 0, min: 0, telas: {}, ultima: 0 };
+      const a = novo.alunos[meu] || { entradas: 0, min: 0, telas: {}, telasMin: {}, ultima: 0 };
+      if (!a.telasMin) a.telasMin = {};
       a.nome = s.name;
       a.entradas += b.entradas;
       a.min += b.min;
       a.ultima = Date.now();
       Object.keys(b.telas).forEach((t) => { a.telas[t] = (a.telas[t] || 0) + b.telas[t]; });
+      Object.keys(b.telasMin).forEach((t) => { a.telasMin[t] = (a.telasMin[t] || 0) + b.telasMin[t]; });
       a.favs = (a.favs || 0) + (b.favs || 0);
       novo.alunos[meu] = a;
       Object.keys(b.parceiros).forEach((pid) => {
@@ -2426,7 +2422,7 @@ export default function App() {
       });
       return novo;
     };
-    const limpar = () => { metrBuf.current = { entradas: 0, min: 0, telas: {}, parceiros: {}, favParceiros: {}, favs: 0, camp: {}, sujo: false }; };
+    const limpar = () => { metrBuf.current = { entradas: 0, min: 0, telas: {}, telasMin: {}, parceiros: {}, favParceiros: {}, favs: 0, camp: {}, sujo: false }; };
     if (demoRef.current) { setMetricas((m) => aplicar(m)); limpar(); return; }
     const base = await lerShared(K.metricas, { alunos: {}, parceiros: {} });
     if (base === undefined) return; // métricas não são críticas: tenta no próximo ciclo
@@ -3364,6 +3360,8 @@ export default function App() {
     let painelAtivo;
     if (abaAdminLarga === "cadastros" && podeVerCadastros) {
       painelAtivo = <PainelCadastrosAlunos allData={allDataUn} fotos={fotos} salvarCadastroAluno={salvarCadastroAluno} salvarCadastroAlunoEmMassa={salvarCadastroAlunoEmMassa} avisar={avisar} semCabecalho unidadesRede={unidadesRede} />;
+    } else if (abaAdminLarga === "comportamento" && adminSuper) {
+      painelAtivo = <PainelComportamento metricas={metricasUn} buscas={buscas} unidadesRede={unidadesRede} unidadeFiltro={unidadeFiltro} semCabecalho />;
     } else if (abaAdminLarga === "unidades" && adminSuper) {
       painelAtivo = <PainelUnidades unidadesRede={unidadesRede} salvarUnidadesRede={salvarUnidadesRede} allData={allData} semCabecalho />;
     } else if (abaAdminLarga === "indicacoes" && (adminSuper || adminPerms.painelCompleto)) {
@@ -3550,6 +3548,7 @@ export default function App() {
           }}>
             {abaBtnLarga("geral", "📊 Visão geral")}
             {abaBtnLarga("cadastros", "👤 Cadastros de alunos", podeVerCadastros)}
+            {abaBtnLarga("comportamento", "🕵️ Comportamento", adminSuper)}
             {abaBtnLarga("indicacoes", "🎁 Programa de Indicação", adminSuper || !!adminPerms.painelCompleto)}
             {abaBtnLarga("missoes", "🐻 Desafios & Missões")}
             {abaBtnLarga("unidades", "🏢 Unidades", adminSuper)}
@@ -5143,79 +5142,6 @@ function TelaPainelAdm({ metricas, clube, fotos, allData, muralAlunos, reacts, c
   const [ordem, setOrdem] = useState("recentes"); // recentes | az | ativos
   const [verTodosAlunos, setVerTodosAlunos] = useState(false);
   const noDash = !!(irCadastros || irClube || irMissoes); // só true dentro do Painel Web (dashboard)
-
-  // 🖱️ Personalização da Visão geral: quais blocos aparecem e em que ordem — só no dashboard,
-  // salvo por aparelho (cada admin pode organizar do seu jeito, não afeta os outros).
-  const [ordemBlocos, setOrdemBlocos] = useState(BLOCOS_PAINEL_DEF.map((b) => b.id));
-  const [blocosOcultos, setBlocosOcultos] = useState([]);
-  const [arrastando, setArrastando] = useState(null);
-  useEffect(() => {
-    if (!noDash) return;
-    lerLocal(K_ORDEM_PAINEL).then((salvo) => {
-      if (salvo && Array.isArray(salvo.ordem)) {
-        const idsValidos = BLOCOS_PAINEL_DEF.map((b) => b.id);
-        const extras = idsValidos.filter((id) => !salvo.ordem.includes(id));
-        setOrdemBlocos([...salvo.ordem.filter((id) => idsValidos.includes(id)), ...extras]);
-        setBlocosOcultos(Array.isArray(salvo.ocultos) ? salvo.ocultos : []);
-      }
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [noDash]);
-  const persistirOrdemBlocos = (ordemNova, ocultosNovo) => { gravarLocal(K_ORDEM_PAINEL, { ordem: ordemNova, ocultos: ocultosNovo }); };
-  const moverBloco = (idArrastado, idAlvo) => {
-    if (idArrastado === idAlvo) return;
-    const nova = [...ordemBlocos];
-    const iOrig = nova.indexOf(idArrastado), iAlvo = nova.indexOf(idAlvo);
-    if (iOrig < 0 || iAlvo < 0) return;
-    nova.splice(iOrig, 1);
-    nova.splice(iAlvo, 0, idArrastado);
-    setOrdemBlocos(nova);
-    persistirOrdemBlocos(nova, blocosOcultos);
-  };
-  const alternarOcultoBloco = (id) => {
-    const novo = blocosOcultos.includes(id) ? blocosOcultos.filter((x) => x !== id) : [...blocosOcultos, id];
-    setBlocosOcultos(novo);
-    persistirOrdemBlocos(ordemBlocos, novo);
-  };
-  const BlocoArrastavel = ({ id, titulo, acaoExtra, children }) => {
-    if (!noDash) {
-      return (
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-            <span style={{ color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 1 }}>{titulo}</span>
-            {acaoExtra}
-          </div>
-          {children}
-        </div>
-      );
-    }
-    if (blocosOcultos.includes(id)) return null;
-    return (
-      <div
-        draggable
-        onDragStart={() => setArrastando(id)}
-        onDragOver={(e) => e.preventDefault()}
-        onDrop={() => { if (arrastando) moverBloco(arrastando, id); setArrastando(null); }}
-        onDragEnd={() => setArrastando(null)}
-        style={{ marginBottom: 16, opacity: arrastando === id ? 0.35 : 1, transition: "opacity .15s ease" }}
-      >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-          <span style={{ display: "flex", alignItems: "center", gap: 8, cursor: "grab" }}>
-            <span style={{ color: C.mut, fontSize: 14 }}>⠿</span>
-            <span style={{ color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 1 }}>{titulo}</span>
-          </span>
-          <span style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            {acaoExtra}
-            <button onClick={() => alternarOcultoBloco(id)} style={{ background: "transparent", border: "none", color: C.mut, cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>
-              🙈 Ocultar
-            </button>
-          </span>
-        </div>
-        {children}
-      </div>
-    );
-  };
-  const blocoOcultoLabel = (id) => (BLOCOS_PAINEL_DEF.find((b) => b.id === id) || {}).titulo || id;
   const dia = 86400000;
   const alunos = Object.entries(metricas.alunos || {}).map(([chave, a]) => ({ chave, ...a }));
   const hoje = alunos.filter((a) => Date.now() - (a.ultima || 0) < dia).length;
@@ -5351,235 +5277,218 @@ function TelaPainelAdm({ metricas, clube, fotos, allData, muralAlunos, reacts, c
         ))}
       </div>
 
-      {ordemBlocos.map((id) => {
-        if (["impacto", "clube", "parceiros", "atencao", "campanhas", "rapidas", "pulso"].includes(id) && !profundo) return null;
+      {/* Impacto do desafio + Uso do clube (lado a lado no dashboard largo) */}
+      {profundo && <>
+      <div style={{ display: "grid", gridTemplateColumns: noDash ? "1.3fr 1fr" : "1fr", gap: 16, marginBottom: 16 }}>
+        <div>
+          <div style={{ color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 1, marginBottom: 8 }}>
+            🏟️ {noDash ? "IMPACTO DO DESAFIO" : "DESAFIO × TEMPO NO APP"}
+          </div>
+          <Painel style={{ display: "grid", gap: 10 }}>
+            {noDash && (
+              <div style={{ color: C.oak, fontWeight: 800, fontSize: 19 }}>
+                {minDesafio - minFora >= 0 ? "+" : ""}{minDesafio - minFora} min de diferença
+              </div>
+            )}
+            <BarraGraf rotulo="Quem está em desafio" valor={minDesafio} max={Math.max(minDesafio, minFora)} sufixo=" min (média)" cor={C.tealSoft} />
+            <BarraGraf rotulo="Quem está fora" valor={minFora} max={Math.max(minDesafio, minFora)} sufixo=" min (média)" cor={`${C.mut}`} />
+            <div style={{ color: C.mut, fontSize: 10.5, lineHeight: 1.5 }}>
+              Tempo médio acumulado no app por pessoa. Diferença grande = o desafio está segurando a comunidade. 🐻
+            </div>
+          </Painel>
+        </div>
 
-        if (id === "impacto") {
-          return (
-            <BlocoArrastavel key="impacto" id="impacto" titulo={noDash ? "🏟️ IMPACTO DO DESAFIO" : "🏟️ DESAFIO × TEMPO NO APP"}>
-              <Painel style={{ display: "grid", gap: 10 }}>
-                {noDash && (
-                  <div style={{ color: C.oak, fontWeight: 800, fontSize: 19 }}>
-                    {minDesafio - minFora >= 0 ? "+" : ""}{minDesafio - minFora} min de diferença
-                  </div>
-                )}
-                <BarraGraf rotulo="Quem está em desafio" valor={minDesafio} max={Math.max(minDesafio, minFora)} sufixo=" min (média)" cor={C.tealSoft} />
-                <BarraGraf rotulo="Quem está fora" valor={minFora} max={Math.max(minDesafio, minFora)} sufixo=" min (média)" cor={`${C.mut}`} />
-                <div style={{ color: C.mut, fontSize: 10.5, lineHeight: 1.5 }}>
-                  Tempo médio acumulado no app por pessoa. Diferença grande = o desafio está segurando a comunidade. 🐻
-                </div>
-              </Painel>
-            </BlocoArrastavel>
-          );
-        }
-
-        if (id === "clube") {
-          if (categorias.length === 0) return null;
-          return (
-            <BlocoArrastavel key="clube" id="clube" titulo="🎟️ USO DO CLUBE"
-              acaoExtra={noDash && irClube && (
+        {/* Clube por categoria */}
+        {categorias.length > 0 && (
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <span style={{ color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 1 }}>🎟️ USO DO CLUBE</span>
+              {noDash && irClube && (
                 <button onClick={irClube} style={{ background: "transparent", border: "none", color: C.tealSoft, fontWeight: 700, fontSize: 11.5, cursor: "pointer", fontFamily: "inherit" }}>Ver detalhes</button>
-              )}>
-              <Painel style={{ display: "grid", gap: 10 }}>
-                {categorias.map(([cat, v]) => (
-                  <BarraGraf key={cat} rotulo={`${cat} · ⭐${v.favoritos}`} valor={v.aberturas} max={maxCat} sufixo=" aberturas" />
-                ))}
-              </Painel>
-            </BlocoArrastavel>
-          );
-        }
+              )}
+            </div>
+            <Painel style={{ display: "grid", gap: 10 }}>
+              {categorias.map(([cat, v]) => (
+                <BarraGraf key={cat} rotulo={`${cat} · ⭐${v.favoritos}`} valor={v.aberturas} max={maxCat} sufixo=" aberturas" />
+              ))}
+            </Painel>
+          </div>
+        )}
+      </div>
 
-        if (id === "parceiros") {
-          if (parceiros.length === 0) return null;
-          return (
-            <BlocoArrastavel key="parceiros" id="parceiros" titulo="🏪 PARCEIROS"
-              acaoExtra={noDash && irClube && (
+      <div style={{ display: "grid", gridTemplateColumns: noDash && alertas.length > 0 ? "1fr 1.3fr" : "1fr", gap: 16, marginBottom: 16 }}>
+        {/* Parceiros */}
+        {parceiros.length > 0 && (
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <span style={{ color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 1 }}>🏪 PARCEIROS</span>
+              {noDash && irClube && (
                 <button onClick={irClube} style={{ background: "transparent", border: "none", color: C.tealSoft, fontWeight: 700, fontSize: 11.5, cursor: "pointer", fontFamily: "inherit" }}>Gerenciar</button>
-              )}>
-              <Painel style={{ display: "grid", gap: 6 }}>
-                {parceiros.map((p, i) => (
-                  <div key={p.pid} style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, gap: 8 }}>
-                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{i + 1}. {p.nome}</span>
-                    <span style={{ flexShrink: 0 }}>
-                      <span style={{ color: C.oak, fontWeight: 800 }}>👁 {p.aberturas}</span>
-                      <span style={{ color: C.tealSoft, fontWeight: 800, marginLeft: 10 }}>⭐ {p.favoritos}</span>
-                    </span>
-                  </div>
-                ))}
-                <div style={{ color: C.mut, fontSize: 10.5, lineHeight: 1.5 }}>👁 = cartão aberto com QR na tela · ⭐ = adicionado aos favoritos</div>
-              </Painel>
-            </BlocoArrastavel>
-          );
-        }
+              )}
+            </div>
+            <Painel style={{ display: "grid", gap: 6 }}>
+              {parceiros.map((p, i) => (
+                <div key={p.pid} style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, gap: 8 }}>
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{i + 1}. {p.nome}</span>
+                  <span style={{ flexShrink: 0 }}>
+                    <span style={{ color: C.oak, fontWeight: 800 }}>👁 {p.aberturas}</span>
+                    <span style={{ color: C.tealSoft, fontWeight: 800, marginLeft: 10 }}>⭐ {p.favoritos}</span>
+                  </span>
+                </div>
+              ))}
+              <div style={{ color: C.mut, fontSize: 10.5, lineHeight: 1.5 }}>👁 = cartão aberto com QR na tela · ⭐ = adicionado aos favoritos</div>
+            </Painel>
+          </div>
+        )}
 
-        if (id === "atencao") {
-          if (!(noDash && alertas.length > 0)) return null;
-          return (
-            <BlocoArrastavel key="atencao" id="atencao" titulo={<>⚠️ ATENÇÃO AGORA <span style={{ color: C.mut, fontWeight: 700 }}>· {alertas.length}</span></>}>
-              <Painel style={{ display: "grid", gap: 8 }}>
-                {alertas.map((a, i) => (
-                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: C.panelSoft, borderRadius: 10 }}>
-                    <span style={{ color: a.cor, fontSize: 15 }}>{a.icone}</span>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 12.5, fontWeight: 700 }}>{a.titulo}</div>
-                      <div style={{ color: C.mut, fontSize: 11.5 }}>{a.desc}</div>
-                    </div>
-                  </div>
-                ))}
-              </Painel>
-            </BlocoArrastavel>
-          );
-        }
-
-        if (id === "campanhas") {
-          if (campanhas.length === 0) return null;
-          return (
-            <BlocoArrastavel key="campanhas" id="campanhas" titulo="📣 CAMPANHAS NO FEED · ENGAJAMENTO">
-              <div style={{ display: "grid", gap: 8 }}>
-                {campanhas.map((c) => (
-                  <Painel key={c.id}>
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                      <span style={{ color: C.tealSoft, fontWeight: 800, fontSize: 12 }}>🏷️ {c.autorNome}</span>
-                      <span style={{ color: C.oak, fontSize: 10.5, flexShrink: 0 }}>{agoLabel(c.ts)}</span>
-                    </div>
-                    <div style={{ fontSize: 12, lineHeight: 1.4, marginTop: 3, color: C.mut }}>{c.texto}</div>
-                    <div style={{ display: "flex", gap: 14, marginTop: 7, fontSize: 12, fontWeight: 800, flexWrap: "wrap" }}>
-                      <span style={{ color: C.cream }}>❤️ {c.nReacoes} reações</span>
-                      <span style={{ color: C.cream }}>💬 {c.nResp} respostas</span>
-                      <span style={{ color: C.oak }}>👆 {(((metricas.campanhas || {})[c.id]) || {}).cliques || 0} foram ao parceiro (QR aberto)</span>
-                    </div>
-                  </Painel>
-                ))}
-              </div>
-            </BlocoArrastavel>
-          );
-        }
-
-        if (id === "rapidas") {
-          if (!noDash) return null;
-          return (
-            <BlocoArrastavel key="rapidas" id="rapidas" titulo="＋ AÇÕES RÁPIDAS">
-              <Painel style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                {[
-                  ["👤", "Cadastrar aluno", irCadastros],
-                  ["🐻", "Ver missões", irMissoes],
-                  ["🎟️", "Gerenciar clube", irClube],
-                  ["↓", "Exportar alunos (CSV)", () => {
-                    const linhas = [["Nome", "Entradas", "Minutos", "Última atividade"]];
-                    alunos.forEach((a) => linhas.push([a.nome || a.chave, a.entradas || 0, a.min || 0, a.ultima ? new Date(a.ultima).toLocaleDateString("pt-BR") : ""]));
-                    const csv = linhas.map((l) => l.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(";")).join("\n");
-                    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
-                    const url = URL.createObjectURL(blob);
-                    const a2 = document.createElement("a");
-                    a2.href = url; a2.download = `alunos-${UNIDADE}-${new Date().toISOString().slice(0, 10)}.csv`;
-                    document.body.appendChild(a2); a2.click(); document.body.removeChild(a2);
-                    URL.revokeObjectURL(url);
-                  }],
-                ].filter(([, , fn]) => !!fn).map(([icone, label, fn]) => (
-                  <button key={label} onClick={fn} style={{
-                    background: C.panelSoft, border: `1px solid ${C.line}`, borderRadius: 10, color: C.cream,
-                    padding: "12px 10px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", textAlign: "left",
-                  }}>
-                    <div style={{ color: C.oak, fontSize: 15, marginBottom: 4 }}>{icone}</div>{label}
-                  </button>
-                ))}
-              </Painel>
-            </BlocoArrastavel>
-          );
-        }
-
-        if (id === "pulso") {
-          if (!noDash) return null;
-          return (
-            <BlocoArrastavel key="pulso" id="pulso" titulo="↗ PULSO DA COMUNIDADE">
-              <Painel>
-                <div style={{ background: C.panelSoft, borderRadius: 10, padding: "12px 14px", marginBottom: 10 }}>
-                  <div style={{ fontWeight: 700, fontSize: 13 }}>Engajamento concentrado</div>
-                  <div style={{ color: C.mut, fontSize: 12, marginTop: 3 }}>
-                    {(minDesafio + minFora) > 0
-                      ? `O desafio responde por ${pctDesafio}% do tempo médio observado no app.`
-                      : "Ainda sem dados suficientes de tempo no app pra calcular essa proporção."}
+        {/* Atenção agora — só no dashboard largo, só com dados reais */}
+        {noDash && alertas.length > 0 && (
+          <div>
+            <div style={{ color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 1, marginBottom: 8 }}>
+              ⚠️ ATENÇÃO AGORA <span style={{ color: C.mut, fontWeight: 700 }}>· {alertas.length}</span>
+            </div>
+            <Painel style={{ display: "grid", gap: 8 }}>
+              {alertas.map((a, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: C.panelSoft, borderRadius: 10 }}>
+                  <span style={{ color: a.cor, fontSize: 15 }}>{a.icone}</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 700 }}>{a.titulo}</div>
+                    <div style={{ color: C.mut, fontSize: 11.5 }}>{a.desc}</div>
                   </div>
                 </div>
-                {alertas.length === 0
-                  ? <div style={{ color: C.ok, fontSize: 12.5, fontWeight: 700 }}>✓ Nenhum alerta no momento</div>
-                  : <div style={{ color: C.oak, fontSize: 12.5, fontWeight: 700 }}>⚠️ {alertas.length} ponto(s) pra olhar — veja "Atenção agora" acima</div>}
-              </Painel>
-            </BlocoArrastavel>
-          );
-        }
+              ))}
+            </Painel>
+          </div>
+        )}
+      </div>
 
-        if (id === "alunos") {
-          return (
-            <BlocoArrastavel key="alunos" id="alunos" titulo="👥 ALUNOS"
-              acaoExtra={
-                <div style={{ display: "flex", gap: 5 }}>
-                  {[["recentes", "RECENTES"], ["az", "A–Z"], ["ativos", "MAIS ATIVOS"]].map(([oid, rot]) => (
-                    <button key={oid} onClick={() => setOrdem(oid)} style={{
-                      background: ordem === oid ? C.teal : C.panelSoft,
-                      color: ordem === oid ? "#F2F2F2" : C.mut,
-                      border: `1px solid ${ordem === oid ? C.teal : C.line}`,
-                      borderRadius: 14, padding: "4px 10px", cursor: "pointer",
-                      fontSize: 10, fontWeight: 800, letterSpacing: 0.4, fontFamily: "inherit",
-                    }}>{rot}</button>
-                  ))}
+      {/* Campanhas: assertividade */}
+      {campanhas.length > 0 && (
+        <>
+          <div style={{ color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 1, marginBottom: 8 }}>📣 CAMPANHAS NO FEED · ENGAJAMENTO</div>
+          <div style={{ display: "grid", gap: 8, marginBottom: 16 }}>
+            {campanhas.map((c) => (
+              <Painel key={c.id}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                  <span style={{ color: C.tealSoft, fontWeight: 800, fontSize: 12 }}>🏷️ {c.autorNome}</span>
+                  <span style={{ color: C.oak, fontSize: 10.5, flexShrink: 0 }}>{agoLabel(c.ts)}</span>
                 </div>
-              }>
-              <div style={{ display: "grid", gap: 8 }}>
-                {(verTodosAlunos ? listaAlunos : listaAlunos.slice(0, 6)).map((a) => {
-                  const [tk, ...r] = a.chave.split(":");
-                  return (
-                    <Painel key={a.chave} onClick={() => abrirPerfilAluno(tk, r.join(":"))} style={{ display: "flex", gap: 12, alignItems: "center" }}>
-                      <Avatar foto={fotos[a.chave]} nome={a.nome} size={36} />
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 700, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {a.nome || a.chave}{participantes.has(a.chave) ? " 🐻" : ""}
-                        </div>
-                        <div style={{ color: C.mut, fontSize: 11 }}>
-                          {a.entradas || 0} entrada(s) · ~{a.min || 0} min
-                          {profundo && <> · {resumoTelas(a.telas) || "só navegou na home"}
-                            {(a.telas || {}).clube || (a.telas || {}).favoritos
-                              ? <span style={{ color: C.oak }}> · 🎟️ Clube {((a.telas || {}).clube || 0) + ((a.telas || {}).favoritos || 0)}×</span>
-                              : null}
-                            {a.favs ? <span style={{ color: C.tealSoft }}> · ⭐ {a.favs} fav</span> : null}</>}
-                        </div>
-                      </div>
-                      <span style={{ color: C.oak, fontSize: 10.5, flexShrink: 0 }}>{a.ultima ? agoLabel(a.ultima) : ""}</span>
-                    </Painel>
-                  );
-                })}
-                {listaAlunos.length === 0 && (
-                  <Painel><div style={{ color: C.mut, fontSize: 12.5, textAlign: "center", lineHeight: 1.6 }}>
-                    Ainda sem registros — conforme os alunos usarem o app, os números aparecem aqui. 📊
-                  </div></Painel>
-                )}
-                {listaAlunos.length > 6 && (
-                  <button onClick={() => setVerTodosAlunos(!verTodosAlunos)} style={{
-                    ...btnFantasma(), width: "100%", border: `1px solid ${C.line}`, borderRadius: 10,
-                    padding: "10px", color: C.tealSoft, fontWeight: 800, fontSize: 12,
-                  }}>
-                    {verTodosAlunos ? "‹ MOSTRAR MENOS" : `MOSTRAR MAIS (${listaAlunos.length - 6}) ›`}
-                  </button>
-                )}
+                <div style={{ fontSize: 12, lineHeight: 1.4, marginTop: 3, color: C.mut }}>{c.texto}</div>
+                <div style={{ display: "flex", gap: 14, marginTop: 7, fontSize: 12, fontWeight: 800, flexWrap: "wrap" }}>
+                  <span style={{ color: C.cream }}>❤️ {c.nReacoes} reações</span>
+                  <span style={{ color: C.cream }}>💬 {c.nResp} respostas</span>
+                  <span style={{ color: C.oak }}>👆 {(((metricas.campanhas || {})[c.id]) || {}).cliques || 0} foram ao parceiro (QR aberto)</span>
+                </div>
+              </Painel>
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* Ações rápidas + Pulso da comunidade — só no dashboard largo */}
+      {noDash && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1.4fr", gap: 16, marginBottom: 16 }}>
+          <div>
+            <div style={{ color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 1, marginBottom: 8 }}>＋ AÇÕES RÁPIDAS</div>
+            <Painel style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              {[
+                ["👤", "Cadastrar aluno", irCadastros],
+                ["🐻", "Ver missões", irMissoes],
+                ["🎟️", "Gerenciar clube", irClube],
+                ["↓", "Exportar alunos (CSV)", () => {
+                  const linhas = [["Nome", "Entradas", "Minutos", "Última atividade"]];
+                  alunos.forEach((a) => linhas.push([a.nome || a.chave, a.entradas || 0, a.min || 0, a.ultima ? new Date(a.ultima).toLocaleDateString("pt-BR") : ""]));
+                  const csv = linhas.map((l) => l.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(";")).join("\n");
+                  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+                  const url = URL.createObjectURL(blob);
+                  const a2 = document.createElement("a");
+                  a2.href = url; a2.download = `alunos-${UNIDADE}-${new Date().toISOString().slice(0, 10)}.csv`;
+                  document.body.appendChild(a2); a2.click(); document.body.removeChild(a2);
+                  URL.revokeObjectURL(url);
+                }],
+              ].filter(([, , fn]) => !!fn).map(([icone, label, fn]) => (
+                <button key={label} onClick={fn} style={{
+                  background: C.panelSoft, border: `1px solid ${C.line}`, borderRadius: 10, color: C.cream,
+                  padding: "12px 10px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", textAlign: "left",
+                }}>
+                  <div style={{ color: C.oak, fontSize: 15, marginBottom: 4 }}>{icone}</div>{label}
+                </button>
+              ))}
+            </Painel>
+          </div>
+          <div>
+            <div style={{ color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 1, marginBottom: 8 }}>↗ PULSO DA COMUNIDADE</div>
+            <Painel>
+              <div style={{ background: C.panelSoft, borderRadius: 10, padding: "12px 14px", marginBottom: 10 }}>
+                <div style={{ fontWeight: 700, fontSize: 13 }}>Engajamento concentrado</div>
+                <div style={{ color: C.mut, fontSize: 12, marginTop: 3 }}>
+                  {(minDesafio + minFora) > 0
+                    ? `O desafio responde por ${pctDesafio}% do tempo médio observado no app.`
+                    : "Ainda sem dados suficientes de tempo no app pra calcular essa proporção."}
+                </div>
               </div>
-            </BlocoArrastavel>
-          );
-        }
-
-        return null;
-      })}
-
-      {noDash && blocosOcultos.length > 0 && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginTop: 6, marginBottom: 16 }}>
-          <span style={{ color: C.mut, fontSize: 11 }}>Ocultos:</span>
-          {blocosOcultos.map((id) => (
-            <button key={id} onClick={() => alternarOcultoBloco(id)} style={{
-              background: "transparent", border: `1px dashed ${C.line}`, borderRadius: 999, padding: "4px 10px",
-              color: C.mut, fontSize: 10.5, cursor: "pointer", fontFamily: "inherit",
-            }}>{blocoOcultoLabel(id)} · mostrar</button>
-          ))}
+              {alertas.length === 0
+                ? <div style={{ color: C.ok, fontSize: 12.5, fontWeight: 700 }}>✓ Nenhum alerta no momento</div>
+                : <div style={{ color: C.oak, fontSize: 12.5, fontWeight: 700 }}>⚠️ {alertas.length} ponto(s) pra olhar — veja "Atenção agora" acima</div>}
+            </Painel>
+          </div>
         </div>
       )}
+
+      </>}
+
+      {/* Alunos com filtros */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, gap: 8, flexWrap: "wrap" }}>
+        <div style={{ color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 1 }}>👥 ALUNOS</div>
+        <div style={{ display: "flex", gap: 5 }}>
+          {[["recentes", "RECENTES"], ["az", "A–Z"], ["ativos", "MAIS ATIVOS"]].map(([id, rot]) => (
+            <button key={id} onClick={() => setOrdem(id)} style={{
+              background: ordem === id ? C.teal : C.panelSoft,
+              color: ordem === id ? "#F2F2F2" : C.mut,
+              border: `1px solid ${ordem === id ? C.teal : C.line}`,
+              borderRadius: 14, padding: "4px 10px", cursor: "pointer",
+              fontSize: 10, fontWeight: 800, letterSpacing: 0.4, fontFamily: "inherit",
+            }}>{rot}</button>
+          ))}
+        </div>
+      </div>
+      <div style={{ display: "grid", gap: 8 }}>
+        {(verTodosAlunos ? listaAlunos : listaAlunos.slice(0, 6)).map((a) => {
+          const [tk, ...r] = a.chave.split(":");
+          return (
+            <Painel key={a.chave} onClick={() => abrirPerfilAluno(tk, r.join(":"))} style={{ display: "flex", gap: 12, alignItems: "center" }}>
+              <Avatar foto={fotos[a.chave]} nome={a.nome} size={36} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 700, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {a.nome || a.chave}{participantes.has(a.chave) ? " 🐻" : ""}
+                </div>
+                <div style={{ color: C.mut, fontSize: 11 }}>
+                  {a.entradas || 0} entrada(s) · ~{a.min || 0} min
+                  {profundo && <> · {resumoTelas(a.telas) || "só navegou na home"}
+                    {(a.telas || {}).clube || (a.telas || {}).favoritos
+                      ? <span style={{ color: C.oak }}> · 🎟️ Clube {((a.telas || {}).clube || 0) + ((a.telas || {}).favoritos || 0)}×</span>
+                      : null}
+                    {a.favs ? <span style={{ color: C.tealSoft }}> · ⭐ {a.favs} fav</span> : null}</>}
+                </div>
+              </div>
+              <span style={{ color: C.oak, fontSize: 10.5, flexShrink: 0 }}>{a.ultima ? agoLabel(a.ultima) : ""}</span>
+            </Painel>
+          );
+        })}
+        {listaAlunos.length === 0 && (
+          <Painel><div style={{ color: C.mut, fontSize: 12.5, textAlign: "center", lineHeight: 1.6 }}>
+            Ainda sem registros — conforme os alunos usarem o app, os números aparecem aqui. 📊
+          </div></Painel>
+        )}
+        {listaAlunos.length > 6 && (
+          <button onClick={() => setVerTodosAlunos(!verTodosAlunos)} style={{
+            ...btnFantasma(), width: "100%", border: `1px solid ${C.line}`, borderRadius: 10,
+            padding: "10px", color: C.tealSoft, fontWeight: 800, fontSize: 12,
+          }}>
+            {verTodosAlunos ? "‹ MOSTRAR MENOS" : `MOSTRAR MAIS (${listaAlunos.length - 6}) ›`}
+          </button>
+        )}
+      </div>
     </>
   );
 }
@@ -5609,6 +5518,160 @@ const BLOCOS_EXPORTACAO = [
   { id: "clube", nome: "Clube — conversão", desc: "Parceiros, aberturas, favoritos, receita" },
   { id: "desafio", nome: "Desafio", desc: "Progresso de missões por aluno, por grupo" },
 ];
+// ---------- Comportamento da Comunidade (SÓ a dona — Raquel) ----------
+// Onde os alunos ficam mais tempo, o que mais acessam, o que buscam.
+// Tempo por página é aproximado (mesmo método usado pro tempo total no app:
+// ~2min por "flush" de atividade), começou a ser guardado a partir de quando
+// esse recurso entrou no ar — não tem histórico de antes disso.
+const LABEL_TELA = {
+  inicio: "🏠 Início", mural: "📣 Mural da Comunidade", ranking: "🏆 Ranking",
+  agenda: "🗓️ Agenda", clube: "🎟️ Clube Spincycle", cadastroClube: "🎟️ Clube (parceiro)",
+  busca: "🔎 Busca", global: "🌐 Visão Global", perfil: "👤 Meu Perfil",
+  fotosAlunos: "📷 Fotos dos Alunos", arena: "🏟️ Arena Spincycle", favoritos: "⭐ Favoritos",
+  instantes: "⚡ Instantes", indicarAmigo: "🎁 Indicar um Amigo", notificacoes: "🔔 Notificações",
+  alunoPerfil: "👤 Perfil de Aluno",
+};
+const rotuloTela = (id) => LABEL_TELA[id] || id;
+
+function PainelComportamento({ metricas, buscas, unidadesRede, unidadeFiltro, semCabecalho, voltar }) {
+  const [busca, setBusca] = useState("");
+  const [alunoAberto, setAlunoAberto] = useState(null); // chave do aluno em destrinche
+
+  const alunos = Object.entries(metricas.alunos || {}).map(([chave, a]) => ({ chave, ...a }));
+  const totalEntradas = alunos.reduce((s, a) => s + (a.entradas || 0), 0);
+  const totalMin = alunos.reduce((s, a) => s + (a.min || 0), 0);
+
+  // Agregado por página: visitas + tempo, somando todo mundo
+  const porPagina = {};
+  alunos.forEach((a) => {
+    Object.entries(a.telas || {}).forEach(([t, n]) => {
+      if (!porPagina[t]) porPagina[t] = { visitas: 0, min: 0 };
+      porPagina[t].visitas += n;
+    });
+    Object.entries(a.telasMin || {}).forEach(([t, n]) => {
+      if (!porPagina[t]) porPagina[t] = { visitas: 0, min: 0 };
+      porPagina[t].min += n;
+    });
+  });
+  const rankingPaginas = Object.entries(porPagina).sort((a, b) => b[1].min - a[1].min);
+  const maxMinPagina = Math.max(1, ...rankingPaginas.map(([, v]) => v.min));
+
+  // O que mais buscam
+  const rankingBuscas = Object.entries(buscas || {}).sort((a, b) => b[1] - a[1]).slice(0, 15);
+  const maxBusca = Math.max(1, ...rankingBuscas.map(([, n]) => n));
+
+  const qBusca = norm(busca);
+  const alunosFiltrados = alunos
+    .filter((a) => !qBusca || norm(a.nome || "").includes(qBusca))
+    .sort((a, b) => (b.min || 0) - (a.min || 0));
+
+  return (
+    <>
+      {!semCabecalho && <CabecalhoTela titulo="COMPORTAMENTO DA COMUNIDADE" sub="Só você vê essa aba. O que os alunos mais acessam, onde ficam mais tempo, e o que buscam." voltar={voltar} />}
+      {semCabecalho && (
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ color: C.mut, fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 6 }}>PAINEL ADMINISTRATIVO · SÓ VOCÊ VÊ</div>
+          <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: 0.3 }}>Comportamento da Comunidade</div>
+          <div style={{ color: C.mut, fontSize: 13, marginTop: 4 }}>Resumo do que mais acessam, onde ficam mais tempo, e o que buscam.</div>
+        </div>
+      )}
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 20 }}>
+        {[["ALUNOS COM REGISTRO", alunos.length], ["ENTRADAS NO APP", totalEntradas], ["TEMPO TOTAL (MIN)", totalMin]].map(([label, valor]) => (
+          <Painel key={label} style={{ display: "grid", gap: 4 }}>
+            <div style={{ color: C.mut, fontSize: 10.5, fontWeight: 700, letterSpacing: 0.4 }}>{label}</div>
+            <div style={{ color: C.cream, fontWeight: 800, fontSize: 24 }}>{valor}</div>
+          </Painel>
+        ))}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr", gap: 16, marginBottom: 20 }}>
+        <div>
+          <div style={{ color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 1, marginBottom: 8 }}>📍 PÁGINAS ONDE MAIS FICAM</div>
+          <Painel style={{ display: "grid", gap: 10 }}>
+            {rankingPaginas.length === 0 && <div style={{ color: C.mut, fontSize: 12.5 }}>Ainda sem dados suficientes — o rastreio de tempo por página começou agora.</div>}
+            {rankingPaginas.map(([t, v]) => (
+              <div key={t} style={{ display: "grid", gap: 3 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5 }}>
+                  <span>{rotuloTela(t)}</span>
+                  <span style={{ color: C.oak, fontWeight: 800 }}>~{v.min} min · {v.visitas}×</span>
+                </div>
+                <div style={{ height: 8, background: C.panelSoft, borderRadius: 6, overflow: "hidden" }}>
+                  <div style={{ width: `${Math.max(3, Math.round((v.min / maxMinPagina) * 100))}%`, height: "100%", background: C.tealSoft, borderRadius: 6 }} />
+                </div>
+              </div>
+            ))}
+          </Painel>
+        </div>
+
+        <div>
+          <div style={{ color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 1, marginBottom: 8 }}>🔎 O QUE MAIS BUSCAM</div>
+          <Painel style={{ display: "grid", gap: 8 }}>
+            {rankingBuscas.length === 0 && <div style={{ color: C.mut, fontSize: 12.5 }}>Ninguém buscou nada ainda.</div>}
+            {rankingBuscas.map(([termo, n]) => (
+              <div key={termo} style={{ display: "grid", gap: 3 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5 }}>
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{termo}</span>
+                  <span style={{ color: C.oak, fontWeight: 800, flexShrink: 0 }}>{n}×</span>
+                </div>
+                <div style={{ height: 6, background: C.panelSoft, borderRadius: 6, overflow: "hidden" }}>
+                  <div style={{ width: `${Math.max(3, Math.round((n / maxBusca) * 100))}%`, height: "100%", background: C.oak, borderRadius: 6 }} />
+                </div>
+              </div>
+            ))}
+          </Painel>
+        </div>
+      </div>
+
+      <div style={{ color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 1, marginBottom: 8 }}>🕵️ DESTRINCHAR POR ALUNO</div>
+      <input style={{ ...inputStyle(), marginBottom: 12 }} placeholder="🔎 Buscar aluno pelo nome…" value={busca} onChange={(e) => setBusca(e.target.value)} />
+      <div style={{ display: "grid", gap: 8 }}>
+        {alunosFiltrados.slice(0, 100).map((a) => {
+          const aberto = alunoAberto === a.chave;
+          const telasOrdenadas = Object.entries(a.telasMin || {}).sort((x, y) => y[1] - x[1]);
+          const telasVisitas = a.telas || {};
+          return (
+            <Painel key={a.chave} style={{ padding: 0, overflow: "hidden" }}>
+              <div onClick={() => setAlunoAberto(aberto ? null : a.chave)} style={{
+                display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", cursor: "pointer",
+              }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13 }}>{a.nome || a.chave}</div>
+                  <div style={{ color: C.mut, fontSize: 11 }}>
+                    {a.entradas || 0} entrada(s) · ~{a.min || 0} min total
+                    {telasOrdenadas[0] && <> · fica mais em <b style={{ color: C.tealSoft }}>{rotuloTela(telasOrdenadas[0][0])}</b></>}
+                  </div>
+                </div>
+                <span style={{ color: C.mut, fontSize: 11 }}>{aberto ? "▲" : "▼"}</span>
+              </div>
+              {aberto && (
+                <div style={{ padding: "0 16px 16px", borderTop: `1px solid ${C.line}` }}>
+                  <div style={{ color: C.mut, fontSize: 10.5, fontWeight: 700, letterSpacing: 0.5, marginTop: 12, marginBottom: 8 }}>ONDE FICA (TEMPO E VISITAS)</div>
+                  {telasOrdenadas.length === 0 && <div style={{ color: C.mut, fontSize: 12 }}>Sem tempo por página registrado ainda pra esse aluno.</div>}
+                  <div style={{ display: "grid", gap: 6 }}>
+                    {telasOrdenadas.map(([t, min]) => (
+                      <div key={t} style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5 }}>
+                        <span>{rotuloTela(t)}</span>
+                        <span style={{ color: C.oak, fontWeight: 700 }}>~{min} min · {telasVisitas[t] || 0}×</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </Painel>
+          );
+        })}
+        {alunosFiltrados.length === 0 && (
+          <Painel><div style={{ color: C.mut, fontSize: 13, textAlign: "center" }}>Ninguém encontrado.</div></Painel>
+        )}
+      </div>
+      {alunosFiltrados.length > 100 && (
+        <div style={{ color: C.mut, fontSize: 11, textAlign: "center", marginTop: 8 }}>Mostrando os 100 com mais tempo no app — refine a busca pra achar alguém específico.</div>
+      )}
+    </>
+  );
+}
+
 function PainelExportarDados({ allData, metricas, clube, unidadesRede, unidadeFiltro, semCabecalho, voltar }) {
   const [marcados, setMarcados] = useState({ alunos: true, uso: true, clube: true, desafio: true });
   const nomeUnidade = (id) => (unidadesRede.find((u) => u.id === id) || {}).nome || id;
@@ -5722,7 +5785,6 @@ function PainelDesafios({ config, salvarConfig, semCabecalho, voltar }) {
       {!semCabecalho && <CabecalhoTela titulo="DESAFIOS DA ARENA" sub="Troque a foto de cada desafio aqui. Ela aparece no feed, no perfil do aluno e na Arena — nos 3 lugares de uma vez só." voltar={voltar} />}
       {semCabecalho && (
         <div style={{ marginBottom: 20 }}>
-          <div style={{ color: C.mut, fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 6 }}>PAINEL ADMINISTRATIVO</div>
           <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: 0.3 }}>Desafios da Arena</div>
           <div style={{ color: C.mut, fontSize: 13, marginTop: 4 }}>Troque a foto de cada desafio aqui — atualiza no feed, no perfil do aluno e na Arena de uma vez só.</div>
         </div>
@@ -5776,6 +5838,14 @@ function PainelIndicacoes({ config, salvarMetasIndicacao, indicacoes, atualizarI
   const [busca, setBusca] = useState("");
   const [filtro, setFiltro] = useState("todos"); // todos | fechou | naoFechou
   const [salvandoId, setSalvandoId] = useState(null);
+  const [texto, setTexto] = useState((config && config.textoIndicacao) || TEXTO_INDICACAO_PADRAO);
+  const [salvandoTexto, setSalvandoTexto] = useState(false);
+  const textoMudou = texto !== ((config && config.textoIndicacao) || TEXTO_INDICACAO_PADRAO);
+  const salvarTexto = async () => {
+    setSalvandoTexto(true);
+    await salvarMetasIndicacao((c) => { c.textoIndicacao = texto.trim() || null; }, "📝 Texto atualizado!");
+    setSalvandoTexto(false);
+  };
 
   const todas = [];
   Object.entries(indicacoes || {}).forEach(([chaveIndicador, lista]) => {
@@ -5835,6 +5905,22 @@ function PainelIndicacoes({ config, salvarMetasIndicacao, indicacoes, atualizarI
         ))}
       </div>
 
+      <div style={{ color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 1, marginBottom: 8 }}>📝 TEXTO DE APRESENTAÇÃO</div>
+      <Painel style={{ marginBottom: 20 }}>
+        <div style={{ color: C.mut, fontSize: 11.5, marginBottom: 8 }}>Aparece pro aluno no topo da tela "Indicar um amigo", antes da lista de metas.</div>
+        <textarea value={texto} onChange={(e) => setTexto(e.target.value)} rows={4}
+          style={{ ...inputStyle(), width: "100%", resize: "vertical", fontFamily: "inherit", lineHeight: 1.5 }} />
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 10 }}>
+          {textoMudou && (
+            <button onClick={() => setTexto((config && config.textoIndicacao) || TEXTO_INDICACAO_PADRAO)} style={{ ...btnFantasma(), color: C.mut, fontSize: 12 }}>Desfazer</button>
+          )}
+          <button disabled={!textoMudou || salvandoTexto} onClick={salvarTexto} style={{
+            background: C.teal, color: "#fff", fontWeight: 800, fontSize: 12.5, border: "none", borderRadius: 999,
+            padding: "10px 20px", cursor: textoMudou ? "pointer" : "default", fontFamily: "inherit", opacity: textoMudou ? 1 : 0.5,
+          }}>{salvandoTexto ? "Salvando…" : "Salvar texto"}</button>
+        </div>
+      </Painel>
+
       <div style={{ color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 1, marginBottom: 8 }}>🏆 METAS DE PREMIAÇÃO</div>
       <Painel style={{ marginBottom: 20 }}>
         <div style={{ display: "grid", gap: 8, marginBottom: 12 }}>
@@ -5848,12 +5934,15 @@ function PainelIndicacoes({ config, salvarMetasIndicacao, indicacoes, atualizarI
           ))}
           {metas.length === 0 && <div style={{ color: C.mut, fontSize: 12.5 }}>Nenhuma meta cadastrada ainda.</div>}
         </div>
-        <div style={{ display: "flex", gap: 8, borderTop: `1px solid ${C.line}`, paddingTop: 12 }}>
-          <input style={{ ...inputStyle(), width: 100 }} type="number" min="1" placeholder="Qtd" value={novaMeta.qtd}
+        <div style={{ display: "flex", gap: 8, borderTop: `1px solid ${C.line}`, paddingTop: 12, alignItems: "center" }}>
+          <input style={{ ...inputStyle(), width: 70, flexShrink: 0 }} type="number" min="1" placeholder="Qtd" value={novaMeta.qtd}
             onChange={(e) => setNovaMeta({ ...novaMeta, qtd: e.target.value })} />
-          <input style={{ ...inputStyle(), flex: 1 }} placeholder="Prêmio (ex.: 1 camiseta)" value={novaMeta.premio}
+          <input style={{ ...inputStyle(), flex: 1, minWidth: 0 }} placeholder="Prêmio (ex.: 1 camiseta)" value={novaMeta.premio}
             onChange={(e) => setNovaMeta({ ...novaMeta, premio: e.target.value })} />
-          <button style={btnPrimario()} onClick={salvarNovaMeta}>{editandoMeta ? "Salvar" : "+ Adicionar"}</button>
+          <button onClick={salvarNovaMeta} style={{
+            background: C.teal, color: "#fff", fontWeight: 800, fontSize: 12.5, border: "none", borderRadius: 999,
+            padding: "10px 20px", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap", flexShrink: 0,
+          }}>{editandoMeta ? "Salvar" : "+ Adicionar"}</button>
         </div>
       </Painel>
 
@@ -6162,6 +6251,12 @@ function PainelCadastrosAlunos({ allData, fotos, salvarCadastroAluno, salvarCada
             <button style={{ ...btnPrimario(), flex: 2 }} onClick={salvar}>SALVAR</button>
           </div>
         </Painel>
+        </div>
+      )}
+
+      {semCabecalho && salvarCadastroAlunoEmMassa && selecionados.size === 0 && (
+        <div style={{ color: C.mut, fontSize: 11.5, marginBottom: 10 }}>
+          ☑️ Marque um ou mais alunos na lista abaixo pra editar em massa (gênero, aprovação).
         </div>
       )}
 
@@ -6883,9 +6978,8 @@ function TelaIndicarAmigo({ minhasIndicacoes = [], indicarAmigo, avisar, voltar,
       <CabecalhoTela titulo="INDICAR UM AMIGO" sub="Você indica, seu amigo ganha, você ganha." voltar={voltar} />
 
       <Painel style={{ marginBottom: 18 }}>
-        <div style={{ color: C.cream, fontSize: 13, lineHeight: 1.5 }}>
-          Aqui você indica um amigo, ele ganha e você ganha. Ele ganha{" "}
-          <b style={{ color: C.oak }}>2 aulas bônus a cada 10 aulas compradas</b>, e você acumula tickets rumo a esses prêmios:
+        <div style={{ color: C.cream, fontSize: 13, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>
+          {(config && config.textoIndicacao) || TEXTO_INDICACAO_PADRAO}
         </div>
         <div style={{ marginTop: 10, display: "grid", gap: 4 }}>
           {metas.map((m) => (
