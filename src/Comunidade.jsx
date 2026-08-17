@@ -460,6 +460,17 @@ const K_VISITADOS = "spincycle-comunidade-visitados";
 const K_TERMOS = "spincycle-comunidade-termos-recentes";
 const K_ULTIMA_VISITA_NOTIF = "spincycle-comunidade-ultima-visita-notif"; // por aparelho — marca "lido até aqui"
 const K_MODO_PAINEL = "spincycle-comunidade-modo-painel"; // "web" | "mobile" — só muda quando a pessoa clica
+const K_ORDEM_PAINEL = "spincycle-comunidade-ordem-painel-web"; // por aparelho — ordem/visibilidade dos blocos da Visão geral (dashboard)
+const BLOCOS_PAINEL_DEF = [
+  { id: "impacto", titulo: "🏟️ IMPACTO DO DESAFIO" },
+  { id: "clube", titulo: "🎟️ USO DO CLUBE" },
+  { id: "parceiros", titulo: "🏪 PARCEIROS" },
+  { id: "atencao", titulo: "⚠️ ATENÇÃO AGORA" },
+  { id: "campanhas", titulo: "📣 CAMPANHAS NO FEED" },
+  { id: "rapidas", titulo: "＋ AÇÕES RÁPIDAS" },
+  { id: "pulso", titulo: "↗ PULSO DA COMUNIDADE" },
+  { id: "alunos", titulo: "👥 ALUNOS" },
+];
 // 🌐 Registro central das unidades da rede — SEM prefixo de unidade, então é o mesmo
 // pra quem acessa por qualquer domínio (prudente, paulista, etc). É aqui que a Visão
 // Global consulta "quais unidades existem" e é aqui que o seletor de unidade se baseia.
@@ -527,6 +538,8 @@ const CONFIG_PADRAO = {
       endereco: "", fone: "", whats: AJUDA_WHATSAPP, ativa: true,
     },
   ],
+  metasIndicacao: null, // null = usa METAS_INDICACAO padrão. Editável pela dona no Painel Web, aba Indicações.
+  totalTicketsIndicacao: null, // null = usa TOTAL_TICKETS_INDICACAO padrão.
 };
 
 // ---------- QR de demonstração (padrão determinístico a partir do código) ----------
@@ -922,19 +935,28 @@ function gerarEventos(allData, gdata) {
       });
 
       // ---------- 5) Inatividade (5 / 15 / 30 dias sem check-in) ----------
+      // Esporádico de propósito: sem isso, TODO aluno inativo gera aviso em TODO carregamento
+      // da página, e o Radar fica dominado por mensagens negativas. Cada aluno só "sorteia"
+      // 1 chance por dia de aparecer (a chance sobe um pouco quanto mais grave o tier),
+      // e o sorteio é estável dentro do mesmo dia (não fica piscando a cada recarregamento).
       const ultimoRegAtivo = recsOk.reduce((m, r) => Math.max(m, r.reg || 0), 0);
       if (ultimoRegAtivo > 0) {
         const dias = Math.floor((Date.now() - ultimoRegAtivo) / 86400000);
         const tier = categoriaInatividade(dias);
         if (tier) {
-          const id = `inativ-${t.id}-${s.id}-${tier}`;
-          const texto = escolherMsgRadar(tier, genero, id, { nome, dias });
-          ev.push({
-            id, ts: Date.now(), icon: "📵",
-            titulo: texto || `${nome} não faz check-in há ${dias} dias.`,
-            corpo: "Vamos mandar um incentivo pra ele(a) voltar.",
-            sid: s.id, track: t.id,
-          });
+          const diaChave = new Date().toISOString().slice(0, 10);
+          const chanceEmN = tier === "inatividade_grave_30d" ? 2 : tier === "inatividade_media_15d" ? 3 : 5;
+          const sorteadoHoje = hash32(`${t.id}-${s.id}-${tier}-${diaChave}`) % chanceEmN === 0;
+          if (sorteadoHoje) {
+            const id = `inativ-${t.id}-${s.id}-${tier}-${diaChave}`;
+            const texto = escolherMsgRadar(tier, genero, id, { nome, dias });
+            ev.push({
+              id, ts: Date.now(), icon: "📵",
+              titulo: texto || `${nome} não faz check-in há ${dias} dias.`,
+              corpo: "Pode ter ido à aula e esquecido de marcar — um incentivo ajuda de qualquer jeito.",
+              sid: s.id, track: t.id,
+            });
+          }
         }
       }
 
@@ -962,15 +984,16 @@ function gerarEventos(allData, gdata) {
         }
       }
 
-      // ---------- Linhas e cartela cheia (mantidos como já eram) ----------
+      // ---------- Linhas e cartela cheia (agora com variedade e gênero, via banco de frases) ----------
       const prog = computeProgress(s, t.targets);
       if (prog.linesDone.length > 0) {
         const ultimoReg = recsOk.reduce((m, r) => Math.max(m, r.reg || 0), 0);
         prog.linesDone.forEach((li) => {
+          const id = `linha-${t.id}-${s.id}-${li}`;
+          const texto = escolherMsgRadar("linha_fechada", genero, id, { nome });
           ev.push({
-            id: `linha-${t.id}-${s.id}-${li}`,
-            ts: ultimoReg, icon: "🏆",
-            titulo: `🏆 ${nome} fechou a linha ${LINE_NAMES[li]} da cartela.`,
+            id, ts: ultimoReg, icon: "🏆",
+            titulo: texto || `🏆 ${nome} fechou a linha ${LINE_NAMES[li]} da cartela.`,
             corpo: "Tá voando, gente.",
             sid: s.id, track: t.id,
           });
@@ -978,15 +1001,41 @@ function gerarEventos(allData, gdata) {
       }
       if (prog.full) {
         const ultimoReg = recsOk.reduce((m, r) => Math.max(m, r.reg || 0), 0);
+        const id = `cheia-${t.id}-${s.id}`;
+        const texto = escolherMsgRadar("cartela_cheia", genero, id, { nome });
         ev.push({
-          id: `cheia-${t.id}-${s.id}`,
-          ts: ultimoReg, icon: "⭐",
-          titulo: `⭐ ${nome} fechou a CARTELA CHEIA.`,
+          id, ts: ultimoReg, icon: "⭐",
+          titulo: texto || `⭐ ${nome} fechou a CARTELA CHEIA.`,
           corpo: "Nove missões. Zero desculpas.",
           sid: s.id, track: t.id,
         });
       }
     });
+
+    // ---------- Ranking de convidados: quem mais tá trazendo amigo (por track) ----------
+    // Esporádico (1x por dia, estável) pra não repetir toda hora — só aparece se alguém
+    // já trouxe pelo menos 2 convidados confirmados, senão não tem "ranking" de verdade ainda.
+    const diaChaveRanking = new Date().toISOString().slice(0, 10);
+    const contagemConvidados = (d.students || [])
+      .filter((s) => s.approved !== false)
+      .map((s) => ({ s, n: (s.guests || []).filter((g) => g.status === "ok").length }))
+      .filter((x) => x.n >= 2)
+      .sort((a, b) => b.n - a.n);
+    if (contagemConvidados.length > 0) {
+      const lider = contagemConvidados[0];
+      const idRanking = `ranking-convidados-${t.id}-${diaChaveRanking}`;
+      const sorteadoHoje = hash32(idRanking) % 3 === 0; // ~1 em cada 3 dias
+      if (sorteadoHoje) {
+        const generoLider = lider.s.genero === "M" || lider.s.genero === "F" ? lider.s.genero : "F";
+        const texto = escolherMsgRadar("ranking_convidados", generoLider, idRanking, { nome: firstName(lider.s.name), n: lider.n });
+        ev.push({
+          id: idRanking, ts: Date.now(), icon: "🏆",
+          titulo: texto || `🏆 ${firstName(lider.s.name)} lidera o ranking de convidados com ${lider.n}!`,
+          corpo: "Quem mais aqui tá trazendo amigo pro desafio?",
+          sid: lider.s.id, track: t.id,
+        });
+      }
+    }
 
     (d.miniMissions || []).forEach((x) => {
       const ts = x.startTs || 0;
@@ -2606,6 +2655,32 @@ export default function App() {
     } catch { avisar("⚠️ Falha ao salvar o perfil."); }
   };
 
+  // Edição em massa (ex.: marcar vários como "Feminino", inativar vários de uma vez).
+  // Agrupa por track e faz UM GET-fresco + UM PUT por track (não um por aluno),
+  // pra não sobrecarregar de escritas e não correr risco de sobrescrever dado concorrente.
+  const salvarCadastroAlunoEmMassa = async (selecionados, patch) => {
+    if (!selecionados || !selecionados.length) return false;
+    const porTrack = {};
+    selecionados.forEach(({ track, id }) => {
+      (porTrack[track] || (porTrack[track] = [])).push(id);
+    });
+    let okTotal = true;
+    for (const track of Object.keys(porTrack)) {
+      const key = KEY_DESAFIO(track);
+      const base = await lerShared(key, { students: [] });
+      if (base === undefined) { avisar("⚠️ Sem conexão — nada foi salvo."); okTotal = false; continue; }
+      const novo = JSON.parse(JSON.stringify(base || { students: [] }));
+      const idsSet = new Set(porTrack[track]);
+      (novo.students || []).forEach((s) => { if (idsSet.has(s.id)) Object.assign(s, patch); });
+      try {
+        await gravarShared(key, novo);
+        setAllData((prev) => ({ ...prev, [track]: novo }));
+      } catch { avisar("⚠️ Falha ao salvar parte dos cadastros."); okTotal = false; }
+    }
+    if (okTotal) avisar(`✅ ${selecionados.length} cadastro(s) atualizado(s) em massa.`);
+    return okTotal;
+  };
+
   const salvarLembrete = async (novoArr) => {
     setLembretes(novoArr);
     if (!demo) await gravarLocal(K_LEMBRETES, novoArr);
@@ -2835,7 +2910,39 @@ export default function App() {
     try { await gravarShared(K.recados, novo); setRecados(novo); } catch { avisar("⚠️ Falha ao remover."); }
   };
 
-  // 🎁 Indicar um Amigo: cada indicação confirmada vira 1 ticket na cartela do indicador
+  // ✏️ Admin edita uma indicação já registrada (marcar "fechou pacote", corrigir nome/telefone).
+  const atualizarIndicacao = async (chaveIndicador, id, patch) => {
+    const base = await lerShared(K.indicacoes, {});
+    if (base === undefined) { avisar("⚠️ Sem conexão — nada foi salvo."); return false; }
+    const novo = JSON.parse(JSON.stringify(base || {}));
+    const lista = novo[chaveIndicador] || [];
+    const rec = lista.find((x) => x.id === id);
+    if (!rec) { avisar("⚠️ Indicação não encontrada."); return false; }
+    Object.assign(rec, patch);
+    try {
+      await gravarShared(K.indicacoes, novo);
+      setIndicacoes(novo);
+      avisar("✅ Indicação atualizada.");
+      return true;
+    } catch { avisar("⚠️ Falha ao salvar."); return false; }
+  };
+
+  // 🏆 Admin edita as metas/prêmios de indicação (config.metasIndicacao).
+  const salvarMetasIndicacao = async (transforma, msg) => {
+    const base = await lerShared(K.config, null);
+    const atual = (base && base !== undefined ? base : config) || CONFIG_PADRAO;
+    const novo = JSON.parse(JSON.stringify(atual));
+    if (!Array.isArray(novo.metasIndicacao)) novo.metasIndicacao = JSON.parse(JSON.stringify(METAS_INDICACAO));
+    transforma(novo);
+    try {
+      await gravarShared(K.config, novo);
+      setConfig(novo);
+      if (msg) avisar(msg);
+      return true;
+    } catch { avisar("⚠️ Falha ao salvar."); return false; }
+  };
+
+  // 🎁 Indicar um Amigo: cada indicação registrada vira 1 ticket na cartela do indicador.
   const indicarAmigo = async (nome, telefone) => {
     if (!minhaChave) return;
     const rec = { id: `ind-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, ts: Date.now(), nome: nome.trim(), telefone: telefone.trim() };
@@ -3256,9 +3363,12 @@ export default function App() {
     const { allData: allDataUn, metricas: metricasUn } = filtrarPorUnidade(allData, metricas, unidadeFiltro);
     let painelAtivo;
     if (abaAdminLarga === "cadastros" && podeVerCadastros) {
-      painelAtivo = <PainelCadastrosAlunos allData={allDataUn} fotos={fotos} salvarCadastroAluno={salvarCadastroAluno} avisar={avisar} semCabecalho unidadesRede={unidadesRede} />;
+      painelAtivo = <PainelCadastrosAlunos allData={allDataUn} fotos={fotos} salvarCadastroAluno={salvarCadastroAluno} salvarCadastroAlunoEmMassa={salvarCadastroAlunoEmMassa} avisar={avisar} semCabecalho unidadesRede={unidadesRede} />;
     } else if (abaAdminLarga === "unidades" && adminSuper) {
       painelAtivo = <PainelUnidades unidadesRede={unidadesRede} salvarUnidadesRede={salvarUnidadesRede} allData={allData} semCabecalho />;
+    } else if (abaAdminLarga === "indicacoes" && (adminSuper || adminPerms.painelCompleto)) {
+      painelAtivo = <PainelIndicacoes config={config} salvarMetasIndicacao={salvarMetasIndicacao} indicacoes={indicacoes}
+        atualizarIndicacao={atualizarIndicacao} nomeDaChave={nomeDaChave} semCabecalho />;
     } else if (abaAdminLarga === "clube" && clubeAcesso.ver) {
       painelAtivo = <CadastroClube clube={clube} salvarClube={salvarClube} removerParceiro={removerParceiro}
         lancarCampanha={lancarCampanha} metricas={metricas} acesso={clubeAcesso} semCabecalho voltar={() => {}} />;
@@ -3300,9 +3410,6 @@ export default function App() {
             <div style={{ color: C.mut, fontSize: 13, marginTop: 4 }}>Fotos dos desafios, participação, avanço e grupos</div>
           </div>
 
-          <PainelDesafios config={config} salvarConfig={salvarConfig} semCabecalho />
-
-          <div style={{ height: 26 }} />
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 20 }}>
             {[["CADASTRADOS", totCadastrados, false], ["ATIVOS NO DESAFIO", totAtivos, false], ["TAXA DE PARTICIPAÇÃO", `${taxaParticipacao}%`, false], ["CARTELAS CHEIAS", totCartelas, true]].map(([label, valor, destaque]) => (
               <Painel key={label} style={{ border: destaque ? `1.5px solid ${C.oak}` : undefined, display: "grid", gap: 4 }}>
@@ -3325,7 +3432,7 @@ export default function App() {
               </a>
             </div>
           </Painel>
-          <div style={{ display: "grid", gridTemplateColumns: `repeat(${linhas.length}, 1fr)`, gap: 14 }}>
+          <div style={{ display: "grid", gridTemplateColumns: `repeat(${linhas.length}, 1fr)`, gap: 14, marginBottom: 26 }}>
             {linhas.map(({ t, alunos: qtdAlunos, comProgresso, cartelaCheia, ranking }) => (
               <Painel key={t.id} style={{ display: "grid", gap: 10 }}>
                 <div style={{ fontWeight: 800, fontSize: 13.5 }}>{t.label}</div>
@@ -3346,6 +3453,9 @@ export default function App() {
               </Painel>
             ))}
           </div>
+
+          <div style={{ height: 30, borderTop: `1px solid ${C.line}`, marginTop: 30 }} />
+          <PainelDesafios config={config} salvarConfig={salvarConfig} semCabecalho />
         </div>
       );
     } else {
@@ -3440,9 +3550,10 @@ export default function App() {
           }}>
             {abaBtnLarga("geral", "📊 Visão geral")}
             {abaBtnLarga("cadastros", "👤 Cadastros de alunos", podeVerCadastros)}
-            {abaBtnLarga("clube", "🎟️ Clube Spincycle", clubeAcesso.ver)}
+            {abaBtnLarga("indicacoes", "🎁 Programa de Indicação", adminSuper || !!adminPerms.painelCompleto)}
             {abaBtnLarga("missoes", "🐻 Desafios & Missões")}
             {abaBtnLarga("unidades", "🏢 Unidades", adminSuper)}
+            {abaBtnLarga("clube", "🎟️ Clube Spincycle", clubeAcesso.ver)}
             {abaBtnLarga("admins", "🔑 Gestão de admins", adminSuper)}
             {abaBtnLarga("exportar", "⬇️ Exportar dados", adminSuper || !!adminPerms.painelCompleto)}
           </nav>
@@ -3861,7 +3972,7 @@ export default function App() {
   ) : null;
 
   const telaIndicarAmigo = (
-    <TelaIndicarAmigo minhasIndicacoes={indicacoes[minhaChave] || []} indicarAmigo={indicarAmigo} avisar={avisar} voltar={() => setTela("inicio")} />
+    <TelaIndicarAmigo minhasIndicacoes={indicacoes[minhaChave] || []} indicarAmigo={indicarAmigo} avisar={avisar} voltar={() => setTela("inicio")} config={config} />
   );
 
   const telaNotificacoes = (
@@ -5032,6 +5143,79 @@ function TelaPainelAdm({ metricas, clube, fotos, allData, muralAlunos, reacts, c
   const [ordem, setOrdem] = useState("recentes"); // recentes | az | ativos
   const [verTodosAlunos, setVerTodosAlunos] = useState(false);
   const noDash = !!(irCadastros || irClube || irMissoes); // só true dentro do Painel Web (dashboard)
+
+  // 🖱️ Personalização da Visão geral: quais blocos aparecem e em que ordem — só no dashboard,
+  // salvo por aparelho (cada admin pode organizar do seu jeito, não afeta os outros).
+  const [ordemBlocos, setOrdemBlocos] = useState(BLOCOS_PAINEL_DEF.map((b) => b.id));
+  const [blocosOcultos, setBlocosOcultos] = useState([]);
+  const [arrastando, setArrastando] = useState(null);
+  useEffect(() => {
+    if (!noDash) return;
+    lerLocal(K_ORDEM_PAINEL).then((salvo) => {
+      if (salvo && Array.isArray(salvo.ordem)) {
+        const idsValidos = BLOCOS_PAINEL_DEF.map((b) => b.id);
+        const extras = idsValidos.filter((id) => !salvo.ordem.includes(id));
+        setOrdemBlocos([...salvo.ordem.filter((id) => idsValidos.includes(id)), ...extras]);
+        setBlocosOcultos(Array.isArray(salvo.ocultos) ? salvo.ocultos : []);
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [noDash]);
+  const persistirOrdemBlocos = (ordemNova, ocultosNovo) => { gravarLocal(K_ORDEM_PAINEL, { ordem: ordemNova, ocultos: ocultosNovo }); };
+  const moverBloco = (idArrastado, idAlvo) => {
+    if (idArrastado === idAlvo) return;
+    const nova = [...ordemBlocos];
+    const iOrig = nova.indexOf(idArrastado), iAlvo = nova.indexOf(idAlvo);
+    if (iOrig < 0 || iAlvo < 0) return;
+    nova.splice(iOrig, 1);
+    nova.splice(iAlvo, 0, idArrastado);
+    setOrdemBlocos(nova);
+    persistirOrdemBlocos(nova, blocosOcultos);
+  };
+  const alternarOcultoBloco = (id) => {
+    const novo = blocosOcultos.includes(id) ? blocosOcultos.filter((x) => x !== id) : [...blocosOcultos, id];
+    setBlocosOcultos(novo);
+    persistirOrdemBlocos(ordemBlocos, novo);
+  };
+  const BlocoArrastavel = ({ id, titulo, acaoExtra, children }) => {
+    if (!noDash) {
+      return (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+            <span style={{ color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 1 }}>{titulo}</span>
+            {acaoExtra}
+          </div>
+          {children}
+        </div>
+      );
+    }
+    if (blocosOcultos.includes(id)) return null;
+    return (
+      <div
+        draggable
+        onDragStart={() => setArrastando(id)}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={() => { if (arrastando) moverBloco(arrastando, id); setArrastando(null); }}
+        onDragEnd={() => setArrastando(null)}
+        style={{ marginBottom: 16, opacity: arrastando === id ? 0.35 : 1, transition: "opacity .15s ease" }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 8, cursor: "grab" }}>
+            <span style={{ color: C.mut, fontSize: 14 }}>⠿</span>
+            <span style={{ color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 1 }}>{titulo}</span>
+          </span>
+          <span style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            {acaoExtra}
+            <button onClick={() => alternarOcultoBloco(id)} style={{ background: "transparent", border: "none", color: C.mut, cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>
+              🙈 Ocultar
+            </button>
+          </span>
+        </div>
+        {children}
+      </div>
+    );
+  };
+  const blocoOcultoLabel = (id) => (BLOCOS_PAINEL_DEF.find((b) => b.id === id) || {}).titulo || id;
   const dia = 86400000;
   const alunos = Object.entries(metricas.alunos || {}).map(([chave, a]) => ({ chave, ...a }));
   const hoje = alunos.filter((a) => Date.now() - (a.ultima || 0) < dia).length;
@@ -5167,218 +5351,235 @@ function TelaPainelAdm({ metricas, clube, fotos, allData, muralAlunos, reacts, c
         ))}
       </div>
 
-      {/* Impacto do desafio + Uso do clube (lado a lado no dashboard largo) */}
-      {profundo && <>
-      <div style={{ display: "grid", gridTemplateColumns: noDash ? "1.3fr 1fr" : "1fr", gap: 16, marginBottom: 16 }}>
-        <div>
-          <div style={{ color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 1, marginBottom: 8 }}>
-            🏟️ {noDash ? "IMPACTO DO DESAFIO" : "DESAFIO × TEMPO NO APP"}
-          </div>
-          <Painel style={{ display: "grid", gap: 10 }}>
-            {noDash && (
-              <div style={{ color: C.oak, fontWeight: 800, fontSize: 19 }}>
-                {minDesafio - minFora >= 0 ? "+" : ""}{minDesafio - minFora} min de diferença
-              </div>
-            )}
-            <BarraGraf rotulo="Quem está em desafio" valor={minDesafio} max={Math.max(minDesafio, minFora)} sufixo=" min (média)" cor={C.tealSoft} />
-            <BarraGraf rotulo="Quem está fora" valor={minFora} max={Math.max(minDesafio, minFora)} sufixo=" min (média)" cor={`${C.mut}`} />
-            <div style={{ color: C.mut, fontSize: 10.5, lineHeight: 1.5 }}>
-              Tempo médio acumulado no app por pessoa. Diferença grande = o desafio está segurando a comunidade. 🐻
-            </div>
-          </Painel>
-        </div>
+      {ordemBlocos.map((id) => {
+        if (["impacto", "clube", "parceiros", "atencao", "campanhas", "rapidas", "pulso"].includes(id) && !profundo) return null;
 
-        {/* Clube por categoria */}
-        {categorias.length > 0 && (
-          <div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-              <span style={{ color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 1 }}>🎟️ USO DO CLUBE</span>
-              {noDash && irClube && (
-                <button onClick={irClube} style={{ background: "transparent", border: "none", color: C.tealSoft, fontWeight: 700, fontSize: 11.5, cursor: "pointer", fontFamily: "inherit" }}>Ver detalhes</button>
-              )}
-            </div>
-            <Painel style={{ display: "grid", gap: 10 }}>
-              {categorias.map(([cat, v]) => (
-                <BarraGraf key={cat} rotulo={`${cat} · ⭐${v.favoritos}`} valor={v.aberturas} max={maxCat} sufixo=" aberturas" />
-              ))}
-            </Painel>
-          </div>
-        )}
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: noDash && alertas.length > 0 ? "1fr 1.3fr" : "1fr", gap: 16, marginBottom: 16 }}>
-        {/* Parceiros */}
-        {parceiros.length > 0 && (
-          <div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-              <span style={{ color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 1 }}>🏪 PARCEIROS</span>
-              {noDash && irClube && (
-                <button onClick={irClube} style={{ background: "transparent", border: "none", color: C.tealSoft, fontWeight: 700, fontSize: 11.5, cursor: "pointer", fontFamily: "inherit" }}>Gerenciar</button>
-              )}
-            </div>
-            <Painel style={{ display: "grid", gap: 6 }}>
-              {parceiros.map((p, i) => (
-                <div key={p.pid} style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, gap: 8 }}>
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{i + 1}. {p.nome}</span>
-                  <span style={{ flexShrink: 0 }}>
-                    <span style={{ color: C.oak, fontWeight: 800 }}>👁 {p.aberturas}</span>
-                    <span style={{ color: C.tealSoft, fontWeight: 800, marginLeft: 10 }}>⭐ {p.favoritos}</span>
-                  </span>
-                </div>
-              ))}
-              <div style={{ color: C.mut, fontSize: 10.5, lineHeight: 1.5 }}>👁 = cartão aberto com QR na tela · ⭐ = adicionado aos favoritos</div>
-            </Painel>
-          </div>
-        )}
-
-        {/* Atenção agora — só no dashboard largo, só com dados reais */}
-        {noDash && alertas.length > 0 && (
-          <div>
-            <div style={{ color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 1, marginBottom: 8 }}>
-              ⚠️ ATENÇÃO AGORA <span style={{ color: C.mut, fontWeight: 700 }}>· {alertas.length}</span>
-            </div>
-            <Painel style={{ display: "grid", gap: 8 }}>
-              {alertas.map((a, i) => (
-                <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: C.panelSoft, borderRadius: 10 }}>
-                  <span style={{ color: a.cor, fontSize: 15 }}>{a.icone}</span>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 12.5, fontWeight: 700 }}>{a.titulo}</div>
-                    <div style={{ color: C.mut, fontSize: 11.5 }}>{a.desc}</div>
+        if (id === "impacto") {
+          return (
+            <BlocoArrastavel key="impacto" id="impacto" titulo={noDash ? "🏟️ IMPACTO DO DESAFIO" : "🏟️ DESAFIO × TEMPO NO APP"}>
+              <Painel style={{ display: "grid", gap: 10 }}>
+                {noDash && (
+                  <div style={{ color: C.oak, fontWeight: 800, fontSize: 19 }}>
+                    {minDesafio - minFora >= 0 ? "+" : ""}{minDesafio - minFora} min de diferença
                   </div>
-                </div>
-              ))}
-            </Painel>
-          </div>
-        )}
-      </div>
-
-      {/* Campanhas: assertividade */}
-      {campanhas.length > 0 && (
-        <>
-          <div style={{ color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 1, marginBottom: 8 }}>📣 CAMPANHAS NO FEED · ENGAJAMENTO</div>
-          <div style={{ display: "grid", gap: 8, marginBottom: 16 }}>
-            {campanhas.map((c) => (
-              <Painel key={c.id}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                  <span style={{ color: C.tealSoft, fontWeight: 800, fontSize: 12 }}>🏷️ {c.autorNome}</span>
-                  <span style={{ color: C.oak, fontSize: 10.5, flexShrink: 0 }}>{agoLabel(c.ts)}</span>
-                </div>
-                <div style={{ fontSize: 12, lineHeight: 1.4, marginTop: 3, color: C.mut }}>{c.texto}</div>
-                <div style={{ display: "flex", gap: 14, marginTop: 7, fontSize: 12, fontWeight: 800, flexWrap: "wrap" }}>
-                  <span style={{ color: C.cream }}>❤️ {c.nReacoes} reações</span>
-                  <span style={{ color: C.cream }}>💬 {c.nResp} respostas</span>
-                  <span style={{ color: C.oak }}>👆 {(((metricas.campanhas || {})[c.id]) || {}).cliques || 0} foram ao parceiro (QR aberto)</span>
+                )}
+                <BarraGraf rotulo="Quem está em desafio" valor={minDesafio} max={Math.max(minDesafio, minFora)} sufixo=" min (média)" cor={C.tealSoft} />
+                <BarraGraf rotulo="Quem está fora" valor={minFora} max={Math.max(minDesafio, minFora)} sufixo=" min (média)" cor={`${C.mut}`} />
+                <div style={{ color: C.mut, fontSize: 10.5, lineHeight: 1.5 }}>
+                  Tempo médio acumulado no app por pessoa. Diferença grande = o desafio está segurando a comunidade. 🐻
                 </div>
               </Painel>
-            ))}
-          </div>
-        </>
-      )}
+            </BlocoArrastavel>
+          );
+        }
 
-      {/* Ações rápidas + Pulso da comunidade — só no dashboard largo */}
-      {noDash && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1.4fr", gap: 16, marginBottom: 16 }}>
-          <div>
-            <div style={{ color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 1, marginBottom: 8 }}>＋ AÇÕES RÁPIDAS</div>
-            <Painel style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              {[
-                ["👤", "Cadastrar aluno", irCadastros],
-                ["🐻", "Ver missões", irMissoes],
-                ["🎟️", "Gerenciar clube", irClube],
-                ["↓", "Exportar alunos (CSV)", () => {
-                  const linhas = [["Nome", "Entradas", "Minutos", "Última atividade"]];
-                  alunos.forEach((a) => linhas.push([a.nome || a.chave, a.entradas || 0, a.min || 0, a.ultima ? new Date(a.ultima).toLocaleDateString("pt-BR") : ""]));
-                  const csv = linhas.map((l) => l.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(";")).join("\n");
-                  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
-                  const url = URL.createObjectURL(blob);
-                  const a2 = document.createElement("a");
-                  a2.href = url; a2.download = `alunos-${UNIDADE}-${new Date().toISOString().slice(0, 10)}.csv`;
-                  document.body.appendChild(a2); a2.click(); document.body.removeChild(a2);
-                  URL.revokeObjectURL(url);
-                }],
-              ].filter(([, , fn]) => !!fn).map(([icone, label, fn]) => (
-                <button key={label} onClick={fn} style={{
-                  background: C.panelSoft, border: `1px solid ${C.line}`, borderRadius: 10, color: C.cream,
-                  padding: "12px 10px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", textAlign: "left",
-                }}>
-                  <div style={{ color: C.oak, fontSize: 15, marginBottom: 4 }}>{icone}</div>{label}
-                </button>
-              ))}
-            </Painel>
-          </div>
-          <div>
-            <div style={{ color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 1, marginBottom: 8 }}>↗ PULSO DA COMUNIDADE</div>
-            <Painel>
-              <div style={{ background: C.panelSoft, borderRadius: 10, padding: "12px 14px", marginBottom: 10 }}>
-                <div style={{ fontWeight: 700, fontSize: 13 }}>Engajamento concentrado</div>
-                <div style={{ color: C.mut, fontSize: 12, marginTop: 3 }}>
-                  {(minDesafio + minFora) > 0
-                    ? `O desafio responde por ${pctDesafio}% do tempo médio observado no app.`
-                    : "Ainda sem dados suficientes de tempo no app pra calcular essa proporção."}
-                </div>
+        if (id === "clube") {
+          if (categorias.length === 0) return null;
+          return (
+            <BlocoArrastavel key="clube" id="clube" titulo="🎟️ USO DO CLUBE"
+              acaoExtra={noDash && irClube && (
+                <button onClick={irClube} style={{ background: "transparent", border: "none", color: C.tealSoft, fontWeight: 700, fontSize: 11.5, cursor: "pointer", fontFamily: "inherit" }}>Ver detalhes</button>
+              )}>
+              <Painel style={{ display: "grid", gap: 10 }}>
+                {categorias.map(([cat, v]) => (
+                  <BarraGraf key={cat} rotulo={`${cat} · ⭐${v.favoritos}`} valor={v.aberturas} max={maxCat} sufixo=" aberturas" />
+                ))}
+              </Painel>
+            </BlocoArrastavel>
+          );
+        }
+
+        if (id === "parceiros") {
+          if (parceiros.length === 0) return null;
+          return (
+            <BlocoArrastavel key="parceiros" id="parceiros" titulo="🏪 PARCEIROS"
+              acaoExtra={noDash && irClube && (
+                <button onClick={irClube} style={{ background: "transparent", border: "none", color: C.tealSoft, fontWeight: 700, fontSize: 11.5, cursor: "pointer", fontFamily: "inherit" }}>Gerenciar</button>
+              )}>
+              <Painel style={{ display: "grid", gap: 6 }}>
+                {parceiros.map((p, i) => (
+                  <div key={p.pid} style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, gap: 8 }}>
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{i + 1}. {p.nome}</span>
+                    <span style={{ flexShrink: 0 }}>
+                      <span style={{ color: C.oak, fontWeight: 800 }}>👁 {p.aberturas}</span>
+                      <span style={{ color: C.tealSoft, fontWeight: 800, marginLeft: 10 }}>⭐ {p.favoritos}</span>
+                    </span>
+                  </div>
+                ))}
+                <div style={{ color: C.mut, fontSize: 10.5, lineHeight: 1.5 }}>👁 = cartão aberto com QR na tela · ⭐ = adicionado aos favoritos</div>
+              </Painel>
+            </BlocoArrastavel>
+          );
+        }
+
+        if (id === "atencao") {
+          if (!(noDash && alertas.length > 0)) return null;
+          return (
+            <BlocoArrastavel key="atencao" id="atencao" titulo={<>⚠️ ATENÇÃO AGORA <span style={{ color: C.mut, fontWeight: 700 }}>· {alertas.length}</span></>}>
+              <Painel style={{ display: "grid", gap: 8 }}>
+                {alertas.map((a, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: C.panelSoft, borderRadius: 10 }}>
+                    <span style={{ color: a.cor, fontSize: 15 }}>{a.icone}</span>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 700 }}>{a.titulo}</div>
+                      <div style={{ color: C.mut, fontSize: 11.5 }}>{a.desc}</div>
+                    </div>
+                  </div>
+                ))}
+              </Painel>
+            </BlocoArrastavel>
+          );
+        }
+
+        if (id === "campanhas") {
+          if (campanhas.length === 0) return null;
+          return (
+            <BlocoArrastavel key="campanhas" id="campanhas" titulo="📣 CAMPANHAS NO FEED · ENGAJAMENTO">
+              <div style={{ display: "grid", gap: 8 }}>
+                {campanhas.map((c) => (
+                  <Painel key={c.id}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                      <span style={{ color: C.tealSoft, fontWeight: 800, fontSize: 12 }}>🏷️ {c.autorNome}</span>
+                      <span style={{ color: C.oak, fontSize: 10.5, flexShrink: 0 }}>{agoLabel(c.ts)}</span>
+                    </div>
+                    <div style={{ fontSize: 12, lineHeight: 1.4, marginTop: 3, color: C.mut }}>{c.texto}</div>
+                    <div style={{ display: "flex", gap: 14, marginTop: 7, fontSize: 12, fontWeight: 800, flexWrap: "wrap" }}>
+                      <span style={{ color: C.cream }}>❤️ {c.nReacoes} reações</span>
+                      <span style={{ color: C.cream }}>💬 {c.nResp} respostas</span>
+                      <span style={{ color: C.oak }}>👆 {(((metricas.campanhas || {})[c.id]) || {}).cliques || 0} foram ao parceiro (QR aberto)</span>
+                    </div>
+                  </Painel>
+                ))}
               </div>
-              {alertas.length === 0
-                ? <div style={{ color: C.ok, fontSize: 12.5, fontWeight: 700 }}>✓ Nenhum alerta no momento</div>
-                : <div style={{ color: C.oak, fontSize: 12.5, fontWeight: 700 }}>⚠️ {alertas.length} ponto(s) pra olhar — veja "Atenção agora" acima</div>}
-            </Painel>
-          </div>
-        </div>
-      )}
+            </BlocoArrastavel>
+          );
+        }
 
-      </>}
+        if (id === "rapidas") {
+          if (!noDash) return null;
+          return (
+            <BlocoArrastavel key="rapidas" id="rapidas" titulo="＋ AÇÕES RÁPIDAS">
+              <Painel style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                {[
+                  ["👤", "Cadastrar aluno", irCadastros],
+                  ["🐻", "Ver missões", irMissoes],
+                  ["🎟️", "Gerenciar clube", irClube],
+                  ["↓", "Exportar alunos (CSV)", () => {
+                    const linhas = [["Nome", "Entradas", "Minutos", "Última atividade"]];
+                    alunos.forEach((a) => linhas.push([a.nome || a.chave, a.entradas || 0, a.min || 0, a.ultima ? new Date(a.ultima).toLocaleDateString("pt-BR") : ""]));
+                    const csv = linhas.map((l) => l.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(";")).join("\n");
+                    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+                    const url = URL.createObjectURL(blob);
+                    const a2 = document.createElement("a");
+                    a2.href = url; a2.download = `alunos-${UNIDADE}-${new Date().toISOString().slice(0, 10)}.csv`;
+                    document.body.appendChild(a2); a2.click(); document.body.removeChild(a2);
+                    URL.revokeObjectURL(url);
+                  }],
+                ].filter(([, , fn]) => !!fn).map(([icone, label, fn]) => (
+                  <button key={label} onClick={fn} style={{
+                    background: C.panelSoft, border: `1px solid ${C.line}`, borderRadius: 10, color: C.cream,
+                    padding: "12px 10px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", textAlign: "left",
+                  }}>
+                    <div style={{ color: C.oak, fontSize: 15, marginBottom: 4 }}>{icone}</div>{label}
+                  </button>
+                ))}
+              </Painel>
+            </BlocoArrastavel>
+          );
+        }
 
-      {/* Alunos com filtros */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, gap: 8, flexWrap: "wrap" }}>
-        <div style={{ color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 1 }}>👥 ALUNOS</div>
-        <div style={{ display: "flex", gap: 5 }}>
-          {[["recentes", "RECENTES"], ["az", "A–Z"], ["ativos", "MAIS ATIVOS"]].map(([id, rot]) => (
-            <button key={id} onClick={() => setOrdem(id)} style={{
-              background: ordem === id ? C.teal : C.panelSoft,
-              color: ordem === id ? "#F2F2F2" : C.mut,
-              border: `1px solid ${ordem === id ? C.teal : C.line}`,
-              borderRadius: 14, padding: "4px 10px", cursor: "pointer",
-              fontSize: 10, fontWeight: 800, letterSpacing: 0.4, fontFamily: "inherit",
-            }}>{rot}</button>
+        if (id === "pulso") {
+          if (!noDash) return null;
+          return (
+            <BlocoArrastavel key="pulso" id="pulso" titulo="↗ PULSO DA COMUNIDADE">
+              <Painel>
+                <div style={{ background: C.panelSoft, borderRadius: 10, padding: "12px 14px", marginBottom: 10 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13 }}>Engajamento concentrado</div>
+                  <div style={{ color: C.mut, fontSize: 12, marginTop: 3 }}>
+                    {(minDesafio + minFora) > 0
+                      ? `O desafio responde por ${pctDesafio}% do tempo médio observado no app.`
+                      : "Ainda sem dados suficientes de tempo no app pra calcular essa proporção."}
+                  </div>
+                </div>
+                {alertas.length === 0
+                  ? <div style={{ color: C.ok, fontSize: 12.5, fontWeight: 700 }}>✓ Nenhum alerta no momento</div>
+                  : <div style={{ color: C.oak, fontSize: 12.5, fontWeight: 700 }}>⚠️ {alertas.length} ponto(s) pra olhar — veja "Atenção agora" acima</div>}
+              </Painel>
+            </BlocoArrastavel>
+          );
+        }
+
+        if (id === "alunos") {
+          return (
+            <BlocoArrastavel key="alunos" id="alunos" titulo="👥 ALUNOS"
+              acaoExtra={
+                <div style={{ display: "flex", gap: 5 }}>
+                  {[["recentes", "RECENTES"], ["az", "A–Z"], ["ativos", "MAIS ATIVOS"]].map(([oid, rot]) => (
+                    <button key={oid} onClick={() => setOrdem(oid)} style={{
+                      background: ordem === oid ? C.teal : C.panelSoft,
+                      color: ordem === oid ? "#F2F2F2" : C.mut,
+                      border: `1px solid ${ordem === oid ? C.teal : C.line}`,
+                      borderRadius: 14, padding: "4px 10px", cursor: "pointer",
+                      fontSize: 10, fontWeight: 800, letterSpacing: 0.4, fontFamily: "inherit",
+                    }}>{rot}</button>
+                  ))}
+                </div>
+              }>
+              <div style={{ display: "grid", gap: 8 }}>
+                {(verTodosAlunos ? listaAlunos : listaAlunos.slice(0, 6)).map((a) => {
+                  const [tk, ...r] = a.chave.split(":");
+                  return (
+                    <Painel key={a.chave} onClick={() => abrirPerfilAluno(tk, r.join(":"))} style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                      <Avatar foto={fotos[a.chave]} nome={a.nome} size={36} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 700, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {a.nome || a.chave}{participantes.has(a.chave) ? " 🐻" : ""}
+                        </div>
+                        <div style={{ color: C.mut, fontSize: 11 }}>
+                          {a.entradas || 0} entrada(s) · ~{a.min || 0} min
+                          {profundo && <> · {resumoTelas(a.telas) || "só navegou na home"}
+                            {(a.telas || {}).clube || (a.telas || {}).favoritos
+                              ? <span style={{ color: C.oak }}> · 🎟️ Clube {((a.telas || {}).clube || 0) + ((a.telas || {}).favoritos || 0)}×</span>
+                              : null}
+                            {a.favs ? <span style={{ color: C.tealSoft }}> · ⭐ {a.favs} fav</span> : null}</>}
+                        </div>
+                      </div>
+                      <span style={{ color: C.oak, fontSize: 10.5, flexShrink: 0 }}>{a.ultima ? agoLabel(a.ultima) : ""}</span>
+                    </Painel>
+                  );
+                })}
+                {listaAlunos.length === 0 && (
+                  <Painel><div style={{ color: C.mut, fontSize: 12.5, textAlign: "center", lineHeight: 1.6 }}>
+                    Ainda sem registros — conforme os alunos usarem o app, os números aparecem aqui. 📊
+                  </div></Painel>
+                )}
+                {listaAlunos.length > 6 && (
+                  <button onClick={() => setVerTodosAlunos(!verTodosAlunos)} style={{
+                    ...btnFantasma(), width: "100%", border: `1px solid ${C.line}`, borderRadius: 10,
+                    padding: "10px", color: C.tealSoft, fontWeight: 800, fontSize: 12,
+                  }}>
+                    {verTodosAlunos ? "‹ MOSTRAR MENOS" : `MOSTRAR MAIS (${listaAlunos.length - 6}) ›`}
+                  </button>
+                )}
+              </div>
+            </BlocoArrastavel>
+          );
+        }
+
+        return null;
+      })}
+
+      {noDash && blocosOcultos.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginTop: 6, marginBottom: 16 }}>
+          <span style={{ color: C.mut, fontSize: 11 }}>Ocultos:</span>
+          {blocosOcultos.map((id) => (
+            <button key={id} onClick={() => alternarOcultoBloco(id)} style={{
+              background: "transparent", border: `1px dashed ${C.line}`, borderRadius: 999, padding: "4px 10px",
+              color: C.mut, fontSize: 10.5, cursor: "pointer", fontFamily: "inherit",
+            }}>{blocoOcultoLabel(id)} · mostrar</button>
           ))}
         </div>
-      </div>
-      <div style={{ display: "grid", gap: 8 }}>
-        {(verTodosAlunos ? listaAlunos : listaAlunos.slice(0, 6)).map((a) => {
-          const [tk, ...r] = a.chave.split(":");
-          return (
-            <Painel key={a.chave} onClick={() => abrirPerfilAluno(tk, r.join(":"))} style={{ display: "flex", gap: 12, alignItems: "center" }}>
-              <Avatar foto={fotos[a.chave]} nome={a.nome} size={36} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 700, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {a.nome || a.chave}{participantes.has(a.chave) ? " 🐻" : ""}
-                </div>
-                <div style={{ color: C.mut, fontSize: 11 }}>
-                  {a.entradas || 0} entrada(s) · ~{a.min || 0} min
-                  {profundo && <> · {resumoTelas(a.telas) || "só navegou na home"}
-                    {(a.telas || {}).clube || (a.telas || {}).favoritos
-                      ? <span style={{ color: C.oak }}> · 🎟️ Clube {((a.telas || {}).clube || 0) + ((a.telas || {}).favoritos || 0)}×</span>
-                      : null}
-                    {a.favs ? <span style={{ color: C.tealSoft }}> · ⭐ {a.favs} fav</span> : null}</>}
-                </div>
-              </div>
-              <span style={{ color: C.oak, fontSize: 10.5, flexShrink: 0 }}>{a.ultima ? agoLabel(a.ultima) : ""}</span>
-            </Painel>
-          );
-        })}
-        {listaAlunos.length === 0 && (
-          <Painel><div style={{ color: C.mut, fontSize: 12.5, textAlign: "center", lineHeight: 1.6 }}>
-            Ainda sem registros — conforme os alunos usarem o app, os números aparecem aqui. 📊
-          </div></Painel>
-        )}
-        {listaAlunos.length > 6 && (
-          <button onClick={() => setVerTodosAlunos(!verTodosAlunos)} style={{
-            ...btnFantasma(), width: "100%", border: `1px solid ${C.line}`, borderRadius: 10,
-            padding: "10px", color: C.tealSoft, fontWeight: 800, fontSize: 12,
-          }}>
-            {verTodosAlunos ? "‹ MOSTRAR MENOS" : `MOSTRAR MAIS (${listaAlunos.length - 6}) ›`}
-          </button>
-        )}
-      </div>
+      )}
     </>
   );
 }
@@ -5567,6 +5768,141 @@ function PainelDesafios({ config, salvarConfig, semCabecalho, voltar }) {
   );
 }
 
+// ---------- Indicações (Indicar um Amigo) — metas editáveis + lista completa ----------
+function PainelIndicacoes({ config, salvarMetasIndicacao, indicacoes, atualizarIndicacao, nomeDaChave, semCabecalho, voltar }) {
+  const metas = (config && config.metasIndicacao) || METAS_INDICACAO;
+  const [novaMeta, setNovaMeta] = useState({ qtd: "", premio: "" });
+  const [editandoMeta, setEditandoMeta] = useState(null); // qtd original sendo editada
+  const [busca, setBusca] = useState("");
+  const [filtro, setFiltro] = useState("todos"); // todos | fechou | naoFechou
+  const [salvandoId, setSalvandoId] = useState(null);
+
+  const todas = [];
+  Object.entries(indicacoes || {}).forEach(([chaveIndicador, lista]) => {
+    (lista || []).forEach((ind) => todas.push({ chaveIndicador, ...ind }));
+  });
+  todas.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  const qBusca = norm(busca);
+  const filtradas = todas.filter((ind) => {
+    if (filtro === "fechou" && !ind.comprou) return false;
+    if (filtro === "naoFechou" && ind.comprou) return false;
+    if (qBusca) {
+      const indicadorNome = norm(nomeDaChave(ind.chaveIndicador) || "");
+      return norm(ind.nome || "").includes(qBusca) || indicadorNome.includes(qBusca);
+    }
+    return true;
+  });
+  const totalFechou = todas.filter((i) => i.comprou).length;
+
+  const salvarNovaMeta = () => {
+    const qtd = parseInt(novaMeta.qtd, 10);
+    if (!qtd || qtd < 1 || !novaMeta.premio.trim()) return;
+    salvarMetasIndicacao((c) => {
+      c.metasIndicacao = c.metasIndicacao.filter((m) => m.qtd !== qtd);
+      c.metasIndicacao.push({ qtd, premio: novaMeta.premio.trim() });
+      c.metasIndicacao.sort((a, b) => a.qtd - b.qtd);
+      c.totalTicketsIndicacao = Math.max(c.totalTicketsIndicacao || 0, ...c.metasIndicacao.map((m) => m.qtd));
+    }, "🏆 Meta salva!");
+    setNovaMeta({ qtd: "", premio: "" });
+    setEditandoMeta(null);
+  };
+  const removerMeta = (qtd) => {
+    salvarMetasIndicacao((c) => { c.metasIndicacao = c.metasIndicacao.filter((m) => m.qtd !== qtd); }, "🗑 Meta removida.");
+  };
+  const alternarComprou = async (ind) => {
+    setSalvandoId(ind.id);
+    await atualizarIndicacao(ind.chaveIndicador, ind.id, { comprou: !ind.comprou });
+    setSalvandoId(null);
+  };
+
+  return (
+    <>
+      {!semCabecalho && <CabecalhoTela titulo="PROGRAMA DE INDICAÇÃO" sub="Metas de premiação e todas as indicações registradas." voltar={voltar} />}
+      {semCabecalho && (
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ color: C.mut, fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 6 }}>PAINEL ADMINISTRATIVO</div>
+          <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: 0.3 }}>Programa de Indicação</div>
+          <div style={{ color: C.mut, fontSize: 13, marginTop: 4 }}>Metas de premiação e todas as indicações registradas, com quem já fechou pacote.</div>
+        </div>
+      )}
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 20 }}>
+        {[["TOTAL DE INDICAÇÕES", todas.length], ["FECHARAM PACOTE", totalFechou], ["TAXA DE CONVERSÃO", todas.length ? `${Math.round((totalFechou / todas.length) * 100)}%` : "—"]].map(([label, valor]) => (
+          <Painel key={label} style={{ display: "grid", gap: 4 }}>
+            <div style={{ color: C.mut, fontSize: 10.5, fontWeight: 700, letterSpacing: 0.4 }}>{label}</div>
+            <div style={{ color: C.cream, fontWeight: 800, fontSize: 24 }}>{valor}</div>
+          </Painel>
+        ))}
+      </div>
+
+      <div style={{ color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 1, marginBottom: 8 }}>🏆 METAS DE PREMIAÇÃO</div>
+      <Painel style={{ marginBottom: 20 }}>
+        <div style={{ display: "grid", gap: 8, marginBottom: 12 }}>
+          {metas.map((m) => (
+            <div key={m.qtd} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ color: C.oak, fontWeight: 800, fontSize: 13, minWidth: 90 }}>{m.qtd} indicações</span>
+              <span style={{ flex: 1, fontSize: 13 }}>{m.premio}</span>
+              <button style={{ ...btnFantasma(), fontSize: 11.5 }} onClick={() => { setEditandoMeta(m.qtd); setNovaMeta({ qtd: String(m.qtd), premio: m.premio }); }}>✏️</button>
+              <button style={{ background: "transparent", border: "none", color: C.mut, cursor: "pointer" }} onClick={() => removerMeta(m.qtd)}>🗑</button>
+            </div>
+          ))}
+          {metas.length === 0 && <div style={{ color: C.mut, fontSize: 12.5 }}>Nenhuma meta cadastrada ainda.</div>}
+        </div>
+        <div style={{ display: "flex", gap: 8, borderTop: `1px solid ${C.line}`, paddingTop: 12 }}>
+          <input style={{ ...inputStyle(), width: 100 }} type="number" min="1" placeholder="Qtd" value={novaMeta.qtd}
+            onChange={(e) => setNovaMeta({ ...novaMeta, qtd: e.target.value })} />
+          <input style={{ ...inputStyle(), flex: 1 }} placeholder="Prêmio (ex.: 1 camiseta)" value={novaMeta.premio}
+            onChange={(e) => setNovaMeta({ ...novaMeta, premio: e.target.value })} />
+          <button style={btnPrimario()} onClick={salvarNovaMeta}>{editandoMeta ? "Salvar" : "+ Adicionar"}</button>
+        </div>
+      </Painel>
+
+      <div style={{ color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 1, marginBottom: 8 }}>📋 TODAS AS INDICAÇÕES</div>
+      <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
+        <input style={{ ...inputStyle(), flex: 1, minWidth: 200 }} placeholder="🔎 Buscar por nome…" value={busca} onChange={(e) => setBusca(e.target.value)} />
+        <div style={{ display: "flex", gap: 6 }}>
+          {[["todos", "Todos"], ["fechou", "Fechou pacote"], ["naoFechou", "Ainda não"]].map(([id, label]) => (
+            <button key={id} onClick={() => setFiltro(id)} style={{
+              background: filtro === id ? C.teal : "transparent", color: filtro === id ? "#fff" : C.mut,
+              border: `1px solid ${filtro === id ? C.teal : C.line}`, borderRadius: 999, padding: "7px 14px",
+              fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+            }}>{label}</button>
+          ))}
+        </div>
+      </div>
+
+      <Painel style={{ padding: 0 }}>
+        {semCabecalho && (
+          <div style={{ display: "grid", gridTemplateColumns: "1.6fr 1.6fr 1.1fr 1fr 1fr", gap: 8, padding: "12px 16px", borderBottom: `1px solid ${C.line}` }}>
+            {["INDICADO POR", "AMIGO INDICADO", "WHATSAPP", "DATA", "FECHOU PACOTE?"].map((h) => (
+              <div key={h} style={{ color: C.mut, fontSize: 10.5, fontWeight: 800, letterSpacing: 0.5 }}>{h}</div>
+            ))}
+          </div>
+        )}
+        {filtradas.slice(0, 300).map((ind) => (
+          <div key={ind.id} style={{
+            display: "grid", gridTemplateColumns: semCabecalho ? "1.6fr 1.6fr 1.1fr 1fr 1fr" : "1fr",
+            gap: semCabecalho ? 8 : 4, padding: semCabecalho ? "12px 16px" : "10px 4px", borderBottom: `1px solid ${C.line}`, alignItems: "center", fontSize: 13,
+          }}>
+            <div style={{ fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{nomeDaChave(ind.chaveIndicador) || "—"}</div>
+            <div>{ind.nome}</div>
+            <div style={{ color: C.mut }}>{ind.telefone ? fmtPhone(ind.telefone) : "—"}</div>
+            <div style={{ color: C.mut, fontSize: 11.5 }}>{ind.ts ? new Date(ind.ts).toLocaleDateString("pt-BR") : "—"}</div>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+              <input type="checkbox" checked={!!ind.comprou} disabled={salvandoId === ind.id} onChange={() => alternarComprou(ind)} />
+              <span style={{ color: ind.comprou ? C.ok : C.mut, fontWeight: 700, fontSize: 11.5 }}>{ind.comprou ? "Sim ✓" : "Ainda não"}</span>
+            </label>
+          </div>
+        ))}
+        {filtradas.length === 0 && <div style={{ padding: 24, textAlign: "center", color: C.mut, fontSize: 13 }}>Nenhuma indicação encontrada.</div>}
+      </Painel>
+      {filtradas.length > 300 && (
+        <div style={{ color: C.mut, fontSize: 11, textAlign: "center", marginTop: 8 }}>Mostrando as primeiras 300 — refine a busca pra achar mais rápido.</div>
+      )}
+    </>
+  );
+}
+
 function PainelUnidades({ unidadesRede, salvarUnidadesRede, allData, semCabecalho, voltar }) {
   const vazio = { nome: "", cidade: "", whats: "" };
   const [form, setForm] = useState(null); // null = lista; objeto = criando/editando
@@ -5669,10 +6005,12 @@ function PainelUnidades({ unidadesRede, salvarUnidadesRede, allData, semCabecalh
   );
 }
 
-function PainelCadastrosAlunos({ allData, fotos, salvarCadastroAluno, avisar, semCabecalho, voltar, unidadesRede }) {
+function PainelCadastrosAlunos({ allData, fotos, salvarCadastroAluno, salvarCadastroAlunoEmMassa, avisar, semCabecalho, voltar, unidadesRede }) {
   const [q, setQ] = useState("");
   const [filtro, setFiltro] = useState("todos"); // todos | semGenero | pendentes | aprovados
   const [editando, setEditando] = useState(null); // { track, id, name, phone, genero, pass, approved }
+  const [selecionados, setSelecionados] = useState(() => new Set()); // Set de "track:id"
+  const [aplicandoMassa, setAplicandoMassa] = useState(false);
   const refEdicao = useRef(null);
   useEffect(() => {
     // 🖱️ Ao abrir a edição de um aluno mais abaixo na lista, rola até o formulário —
@@ -5701,6 +6039,38 @@ function PainelCadastrosAlunos({ allData, fotos, salvarCadastroAluno, avisar, se
   const semGenero = rows.filter(({ s }) => s.genero !== "M" && s.genero !== "F").length;
   const pendentes = rows.filter(({ s }) => s.approved === false).length;
   const aprovados = rows.length - pendentes;
+
+  const alternarSelecao = (chave) => {
+    setSelecionados((prev) => {
+      const novo = new Set(prev);
+      if (novo.has(chave)) novo.delete(chave); else novo.add(chave);
+      return novo;
+    });
+  };
+  const todosVisiveisMarcados = filtrados.length > 0 && filtrados.every(({ t, s }) => selecionados.has(`${t.id}:${s.id}`));
+  const alternarSelecionarTodos = () => {
+    setSelecionados((prev) => {
+      if (todosVisiveisMarcados) {
+        const novo = new Set(prev);
+        filtrados.forEach(({ t, s }) => novo.delete(`${t.id}:${s.id}`));
+        return novo;
+      }
+      const novo = new Set(prev);
+      filtrados.forEach(({ t, s }) => novo.add(`${t.id}:${s.id}`));
+      return novo;
+    });
+  };
+  const selecionadosArr = () => Array.from(selecionados).map((chave) => {
+    const [track, id] = chave.split(":");
+    return { track, id };
+  });
+  const aplicarEmMassa = async (patch, label) => {
+    if (!selecionados.size || !salvarCadastroAlunoEmMassa) return;
+    setAplicandoMassa(true);
+    await salvarCadastroAlunoEmMassa(selecionadosArr(), patch);
+    setAplicandoMassa(false);
+    setSelecionados(new Set());
+  };
 
   const abrirEdicao = ({ t, s }) => setEditando({
     track: t.id, id: s.id, name: s.name, phone: s.phone ? normPhone(s.phone) : "",
@@ -5795,11 +6165,32 @@ function PainelCadastrosAlunos({ allData, fotos, salvarCadastroAluno, avisar, se
         </div>
       )}
 
+      {semCabecalho && salvarCadastroAlunoEmMassa && selecionados.size > 0 && (
+        <Painel style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 14, border: `1.5px solid ${C.teal}` }}>
+          <span style={{ fontWeight: 800, fontSize: 12.5 }}>{selecionados.size} selecionado(s)</span>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginLeft: "auto" }}>
+            <button disabled={aplicandoMassa} style={{ ...btnFantasma(), border: `1px solid ${C.line}`, borderRadius: 8, padding: "6px 12px", fontSize: 11.5 }}
+              onClick={() => aplicarEmMassa({ genero: "F" })}>♀ Marcar como Feminino</button>
+            <button disabled={aplicandoMassa} style={{ ...btnFantasma(), border: `1px solid ${C.line}`, borderRadius: 8, padding: "6px 12px", fontSize: 11.5 }}
+              onClick={() => aplicarEmMassa({ genero: "M" })}>♂ Marcar como Masculino</button>
+            <button disabled={aplicandoMassa} style={{ ...btnFantasma(), border: `1px solid ${C.ok}88`, color: C.ok, borderRadius: 8, padding: "6px 12px", fontSize: 11.5 }}
+              onClick={() => aplicarEmMassa({ approved: true })}>✅ Aprovar</button>
+            <button disabled={aplicandoMassa} style={{ ...btnFantasma(), border: `1px solid #E0858588`, color: "#E08585", borderRadius: 8, padding: "6px 12px", fontSize: 11.5 }}
+              onClick={() => aplicarEmMassa({ approved: false })}>⛔ Inativar</button>
+            <button disabled={aplicandoMassa} style={{ ...btnFantasma(), color: C.mut, fontSize: 11.5 }} onClick={() => setSelecionados(new Set())}>Limpar seleção</button>
+          </div>
+        </Painel>
+      )}
+
       <Painel style={{ padding: 0 }}>
         <div style={{
-          display: "grid", gridTemplateColumns: semCabecalho ? "2fr 1.3fr 1fr 1fr 1fr" : undefined, gap: 8,
-          padding: semCabecalho ? "12px 16px" : 0, borderBottom: semCabecalho ? `1px solid ${C.line}` : "none",
+          display: "grid", gridTemplateColumns: semCabecalho ? "34px 2fr 1.3fr 1fr 1fr 1fr" : undefined, gap: 8,
+          padding: semCabecalho ? "12px 16px" : 0, borderBottom: semCabecalho ? `1px solid ${C.line}` : "none", alignItems: "center",
         }}>
+          {semCabecalho && salvarCadastroAlunoEmMassa && (
+            <input type="checkbox" checked={todosVisiveisMarcados} onChange={alternarSelecionarTodos} style={{ width: 16, height: 16 }} />
+          )}
+          {semCabecalho && !salvarCadastroAlunoEmMassa && <div />}
           {semCabecalho && ["ALUNO", "CONTATO", "GÊNERO", "STATUS", ""].map((h) => (
             <div key={h} style={{ color: C.mut, fontSize: 10.5, fontWeight: 800, letterSpacing: 0.5 }}>{h}</div>
           ))}
@@ -5826,7 +6217,10 @@ function PainelCadastrosAlunos({ allData, fotos, salvarCadastroAluno, avisar, se
             );
           }
           return (
-            <div key={chave} style={{ display: "grid", gridTemplateColumns: "2fr 1.3fr 1fr 1fr 1fr", gap: 8, padding: "12px 16px", borderBottom: `1px solid ${C.line}`, alignItems: "center", fontSize: 13 }}>
+            <div key={chave} style={{ display: "grid", gridTemplateColumns: "34px 2fr 1.3fr 1fr 1fr 1fr", gap: 8, padding: "12px 16px", borderBottom: `1px solid ${C.line}`, alignItems: "center", fontSize: 13 }}>
+              {salvarCadastroAlunoEmMassa
+                ? <input type="checkbox" checked={selecionados.has(chave)} onChange={() => alternarSelecao(chave)} style={{ width: 16, height: 16 }} />
+                : <div />}
               <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
                 <Avatar foto={fotos[chave]} nome={s.name} size={30} />
                 <div style={{ minWidth: 0 }}>
@@ -6467,11 +6861,13 @@ function TelaNotificacoes({ notificacoes, voltar }) {
   );
 }
 
-function TelaIndicarAmigo({ minhasIndicacoes = [], indicarAmigo, avisar, voltar }) {
+function TelaIndicarAmigo({ minhasIndicacoes = [], indicarAmigo, avisar, voltar, config }) {
   const [nome, setNome] = useState("");
   const [telefone, setTelefone] = useState("");
+  const metas = (config && config.metasIndicacao) || METAS_INDICACAO;
+  const totalTickets = (config && config.totalTicketsIndicacao) || TOTAL_TICKETS_INDICACAO;
   const qtd = minhasIndicacoes.length;
-  const proximaMeta = METAS_INDICACAO.find((m) => qtd < m.qtd);
+  const proximaMeta = metas.find((m) => qtd < m.qtd);
 
   const enviar = () => {
     const n = nome.trim().replace(/\s+/g, " ");
@@ -6492,7 +6888,7 @@ function TelaIndicarAmigo({ minhasIndicacoes = [], indicarAmigo, avisar, voltar 
           <b style={{ color: C.oak }}>2 aulas bônus a cada 10 aulas compradas</b>, e você acumula tickets rumo a esses prêmios:
         </div>
         <div style={{ marginTop: 10, display: "grid", gap: 4 }}>
-          {METAS_INDICACAO.map((m) => (
+          {metas.map((m) => (
             <div key={m.qtd} style={{ fontSize: 12, color: C.mut }}>
               <b style={{ color: C.oak }}>{m.qtd} indicações</b> — {m.premio}
             </div>
@@ -6501,11 +6897,11 @@ function TelaIndicarAmigo({ minhasIndicacoes = [], indicarAmigo, avisar, voltar 
       </Painel>
 
       <div style={{ color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 1, marginBottom: 8 }}>
-        🎟️ SEUS TICKETS ({qtd}/{TOTAL_TICKETS_INDICACAO})
+        🎟️ SEUS TICKETS ({qtd}/{totalTickets})
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8, marginBottom: 8 }}>
-        {Array.from({ length: TOTAL_TICKETS_INDICACAO }, (_, i) => i + 1).map((n) => {
-          const meta = METAS_INDICACAO.find((m) => m.qtd === n);
+        {Array.from({ length: totalTickets }, (_, i) => i + 1).map((n) => {
+          const meta = metas.find((m) => m.qtd === n);
           return <TicketIndicacao key={n} n={n} alcancado={qtd >= n} premio={meta ? meta.premio : null} />;
         })}
       </div>
