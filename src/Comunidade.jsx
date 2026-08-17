@@ -1082,6 +1082,12 @@ function rankingGeral(allData) {
 // ---------- Ícones SVG da marca (linha fina, estilo do mockup) ----------
 const ICONE = {
   // Ícones funcionais: paths oficiais Lucide (ISC license) — grid 24, traço 2
+  atualizar: [
+    <path key="a" d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />,
+    <path key="b" d="M21 3v5h-5" />,
+    <path key="c" d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />,
+    <path key="d" d="M8 16H3v5" />,
+  ],
   casa: [
     <path key="a" d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8" />,
     <path key="b" d="M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />,
@@ -2266,10 +2272,12 @@ export default function App() {
       height: atualizando ? 44 : Math.min(pullDist, 60), overflow: "hidden", transition: atualizando ? "height .15s ease" : "none",
     }}>
       <span style={{
-        fontSize: 18, color: C.oak, display: "inline-block",
+        display: "inline-flex",
         animation: atualizando ? "girar 0.7s linear infinite" : "none",
         transform: atualizando ? "none" : `rotate(${Math.min(pullDist, 60) * 3}deg)`,
-      }}>🔄</span>
+      }}>
+        <Ic nome="atualizar" size={20} stroke={2} style={{ color: C.oak }} />
+      </span>
     </div>
   ) : null;
 
@@ -3361,7 +3369,8 @@ export default function App() {
     if (abaAdminLarga === "cadastros" && podeVerCadastros) {
       painelAtivo = <PainelCadastrosAlunos allData={allDataUn} fotos={fotos} salvarCadastroAluno={salvarCadastroAluno} salvarCadastroAlunoEmMassa={salvarCadastroAlunoEmMassa} avisar={avisar} semCabecalho unidadesRede={unidadesRede} />;
     } else if (abaAdminLarga === "comportamento" && adminSuper) {
-      painelAtivo = <PainelComportamento metricas={metricasUn} buscas={buscas} unidadesRede={unidadesRede} unidadeFiltro={unidadeFiltro} semCabecalho />;
+      painelAtivo = <PainelComportamento metricas={metricasUn} buscas={buscas} unidadesRede={unidadesRede} unidadeFiltro={unidadeFiltro}
+        allData={allDataUn} presenca={presenca} giro175={giro175} pacotes4={pacotes4} relampago={relampago} semCabecalho />;
     } else if (abaAdminLarga === "unidades" && adminSuper) {
       painelAtivo = <PainelUnidades unidadesRede={unidadesRede} salvarUnidadesRede={salvarUnidadesRede} allData={allData} semCabecalho />;
     } else if (abaAdminLarga === "indicacoes" && (adminSuper || adminPerms.painelCompleto)) {
@@ -3373,7 +3382,8 @@ export default function App() {
     } else if (abaAdminLarga === "admins" && adminSuper) {
       painelAtivo = <TelaGestaoAdmins adminsReg={adminsReg} salvarAdmins={salvarAdmins} allData={allData} fotos={fotos} avisar={avisar} semCabecalho voltar={() => {}} />;
     } else if (abaAdminLarga === "exportar" && (adminSuper || adminPerms.painelCompleto)) {
-      painelAtivo = <PainelExportarDados allData={allData} metricas={metricas} clube={clube} unidadesRede={unidadesRede} unidadeFiltro={unidadeFiltro} semCabecalho />;
+      painelAtivo = <PainelExportarDados allData={allData} metricas={metricas} clube={clube} unidadesRede={unidadesRede} unidadeFiltro={unidadeFiltro}
+        buscas={buscas} indicacoes={indicacoes} nomeDaChave={nomeDaChave} semCabecalho />;
     } else if (abaAdminLarga === "missoes") {
       const linhas = TRACKS.map((t) => {
         const alunosTrack = ((allDataUn[t.id] || {}).students || []);
@@ -5517,6 +5527,9 @@ const BLOCOS_EXPORTACAO = [
   { id: "uso", nome: "Crescimento e uso", desc: "Entradas, tempo no app, última atividade por aluno" },
   { id: "clube", nome: "Clube — conversão", desc: "Parceiros, aberturas, favoritos, receita" },
   { id: "desafio", nome: "Desafio", desc: "Progresso de missões por aluno, por grupo" },
+  { id: "comportamento", nome: "Comportamento", desc: "Páginas mais acessadas, tempo por página, o que mais buscam" },
+  { id: "indicacoes", nome: "Programa de Indicação", desc: "Quem indicou quem, fechou pacote, quantas aulas" },
+  { id: "unidades", nome: "Unidades", desc: "Lista de unidades da rede e quantos alunos em cada uma" },
 ];
 // ---------- Comportamento da Comunidade (SÓ a dona — Raquel) ----------
 // Onde os alunos ficam mais tempo, o que mais acessam, o que buscam.
@@ -5533,13 +5546,16 @@ const LABEL_TELA = {
 };
 const rotuloTela = (id) => LABEL_TELA[id] || id;
 
-function PainelComportamento({ metricas, buscas, unidadesRede, unidadeFiltro, semCabecalho, voltar }) {
+function PainelComportamento({ metricas, buscas, unidadesRede, unidadeFiltro, allData = {}, presenca = {}, giro175 = {}, pacotes4 = {}, relampago = {}, semCabecalho, voltar }) {
   const [busca, setBusca] = useState("");
   const [alunoAberto, setAlunoAberto] = useState(null); // chave do aluno em destrinche
+  const [verMaisPaginas, setVerMaisPaginas] = useState(false);
+  const [verMaisBuscas, setVerMaisBuscas] = useState(false);
 
   const alunos = Object.entries(metricas.alunos || {}).map(([chave, a]) => ({ chave, ...a }));
   const totalEntradas = alunos.reduce((s, a) => s + (a.entradas || 0), 0);
   const totalMin = alunos.reduce((s, a) => s + (a.min || 0), 0);
+  const online = Object.values(presenca).filter((ts) => Date.now() - ts < 3 * 60000).length;
 
   // Agregado por página: visitas + tempo, somando todo mundo
   const porPagina = {};
@@ -5553,17 +5569,30 @@ function PainelComportamento({ metricas, buscas, unidadesRede, unidadeFiltro, se
       porPagina[t].min += n;
     });
   });
-  const rankingPaginas = Object.entries(porPagina).sort((a, b) => b[1].min - a[1].min);
-  const maxMinPagina = Math.max(1, ...rankingPaginas.map(([, v]) => v.min));
+  const rankingPaginasTodas = Object.entries(porPagina).sort((a, b) => b[1].min - a[1].min);
+  const rankingPaginas = verMaisPaginas ? rankingPaginasTodas : rankingPaginasTodas.slice(0, 10);
+  const maxMinPagina = Math.max(1, ...rankingPaginasTodas.map(([, v]) => v.min));
 
   // O que mais buscam
-  const rankingBuscas = Object.entries(buscas || {}).sort((a, b) => b[1] - a[1]).slice(0, 15);
-  const maxBusca = Math.max(1, ...rankingBuscas.map(([, n]) => n));
+  const rankingBuscasTodas = Object.entries(buscas || {}).sort((a, b) => b[1] - a[1]);
+  const rankingBuscas = verMaisBuscas ? rankingBuscasTodas : rankingBuscasTodas.slice(0, 10);
+  const maxBusca = Math.max(1, ...rankingBuscasTodas.map(([, n]) => n));
 
   const qBusca = norm(busca);
   const alunosFiltrados = alunos
     .filter((a) => !qBusca || norm(a.nome || "").includes(qBusca))
     .sort((a, b) => (b.min || 0) - (a.min || 0));
+
+  // Desafio + progresso + selos ganhos, a partir da própria chave (track:sid)
+  const detalheDesafio = (chave) => {
+    const [trackId, sid] = chave.split(":");
+    const t = TRACKS.find((x) => x.id === trackId);
+    const s = ((allData[trackId] || {}).students || []).find((x) => x.id === sid);
+    if (!t || !s) return null;
+    const prog = computeProgress(s, t.targets);
+    const carimbos = calcularCarimbos(prog, trackId, { giro175, pacotes4, relampago }, chave, s, t.targets);
+    return { trackLabel: t.label, prog, carimbos };
+  };
 
   return (
     <>
@@ -5576,11 +5605,11 @@ function PainelComportamento({ metricas, buscas, unidadesRede, unidadeFiltro, se
         </div>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 20 }}>
-        {[["ALUNOS COM REGISTRO", alunos.length], ["ENTRADAS NO APP", totalEntradas], ["TEMPO TOTAL (MIN)", totalMin]].map(([label, valor]) => (
-          <Painel key={label} style={{ display: "grid", gap: 4 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 20 }}>
+        {[["ONLINE AGORA", online, true], ["ALUNOS COM REGISTRO", alunos.length, false], ["ENTRADAS NO APP", totalEntradas, false], ["TEMPO TOTAL (MIN)", totalMin, false]].map(([label, valor, destaque]) => (
+          <Painel key={label} style={{ display: "grid", gap: 4, border: destaque ? `1.5px solid ${C.ok}` : undefined }}>
             <div style={{ color: C.mut, fontSize: 10.5, fontWeight: 700, letterSpacing: 0.4 }}>{label}</div>
-            <div style={{ color: C.cream, fontWeight: 800, fontSize: 24 }}>{valor}</div>
+            <div style={{ color: destaque ? C.ok : C.cream, fontWeight: 800, fontSize: 24 }}>{destaque && "🟢 "}{valor}</div>
           </Painel>
         ))}
       </div>
@@ -5589,7 +5618,7 @@ function PainelComportamento({ metricas, buscas, unidadesRede, unidadeFiltro, se
         <div>
           <div style={{ color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 1, marginBottom: 8 }}>📍 PÁGINAS ONDE MAIS FICAM</div>
           <Painel style={{ display: "grid", gap: 10 }}>
-            {rankingPaginas.length === 0 && <div style={{ color: C.mut, fontSize: 12.5 }}>Ainda sem dados suficientes — o rastreio de tempo por página começou agora.</div>}
+            {rankingPaginasTodas.length === 0 && <div style={{ color: C.mut, fontSize: 12.5 }}>Ainda sem dados suficientes — o rastreio de tempo por página começou agora.</div>}
             {rankingPaginas.map(([t, v]) => (
               <div key={t} style={{ display: "grid", gap: 3 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5 }}>
@@ -5601,13 +5630,18 @@ function PainelComportamento({ metricas, buscas, unidadesRede, unidadeFiltro, se
                 </div>
               </div>
             ))}
+            {rankingPaginasTodas.length > 10 && (
+              <button onClick={() => setVerMaisPaginas(!verMaisPaginas)} style={{
+                ...btnFantasma(), border: `1px solid ${C.line}`, borderRadius: 10, padding: "8px", color: C.tealSoft, fontWeight: 800, fontSize: 11.5, marginTop: 4,
+              }}>{verMaisPaginas ? "‹ Mostrar menos" : `Mostrar mais (${rankingPaginasTodas.length - 10}) ›`}</button>
+            )}
           </Painel>
         </div>
 
         <div>
           <div style={{ color: C.oak, fontWeight: 800, fontSize: 12.5, letterSpacing: 1, marginBottom: 8 }}>🔎 O QUE MAIS BUSCAM</div>
           <Painel style={{ display: "grid", gap: 8 }}>
-            {rankingBuscas.length === 0 && <div style={{ color: C.mut, fontSize: 12.5 }}>Ninguém buscou nada ainda.</div>}
+            {rankingBuscasTodas.length === 0 && <div style={{ color: C.mut, fontSize: 12.5 }}>Ninguém buscou nada ainda.</div>}
             {rankingBuscas.map(([termo, n]) => (
               <div key={termo} style={{ display: "grid", gap: 3 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5 }}>
@@ -5619,6 +5653,11 @@ function PainelComportamento({ metricas, buscas, unidadesRede, unidadeFiltro, se
                 </div>
               </div>
             ))}
+            {rankingBuscasTodas.length > 10 && (
+              <button onClick={() => setVerMaisBuscas(!verMaisBuscas)} style={{
+                ...btnFantasma(), border: `1px solid ${C.line}`, borderRadius: 10, padding: "8px", color: C.tealSoft, fontWeight: 800, fontSize: 11.5, marginTop: 4,
+              }}>{verMaisBuscas ? "‹ Mostrar menos" : `Mostrar mais (${rankingBuscasTodas.length - 10}) ›`}</button>
+            )}
           </Painel>
         </div>
       </div>
@@ -5630,6 +5669,7 @@ function PainelComportamento({ metricas, buscas, unidadesRede, unidadeFiltro, se
           const aberto = alunoAberto === a.chave;
           const telasOrdenadas = Object.entries(a.telasMin || {}).sort((x, y) => y[1] - x[1]);
           const telasVisitas = a.telas || {};
+          const det = aberto ? detalheDesafio(a.chave) : null;
           return (
             <Painel key={a.chave} style={{ padding: 0, overflow: "hidden" }}>
               <div onClick={() => setAlunoAberto(aberto ? null : a.chave)} style={{
@@ -5648,7 +5688,7 @@ function PainelComportamento({ metricas, buscas, unidadesRede, unidadeFiltro, se
                 <div style={{ padding: "0 16px 16px", borderTop: `1px solid ${C.line}` }}>
                   <div style={{ color: C.mut, fontSize: 10.5, fontWeight: 700, letterSpacing: 0.5, marginTop: 12, marginBottom: 8 }}>ONDE FICA (TEMPO E VISITAS)</div>
                   {telasOrdenadas.length === 0 && <div style={{ color: C.mut, fontSize: 12 }}>Sem tempo por página registrado ainda pra esse aluno.</div>}
-                  <div style={{ display: "grid", gap: 6 }}>
+                  <div style={{ display: "grid", gap: 6, marginBottom: 14 }}>
                     {telasOrdenadas.map(([t, min]) => (
                       <div key={t} style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5 }}>
                         <span>{rotuloTela(t)}</span>
@@ -5656,6 +5696,28 @@ function PainelComportamento({ metricas, buscas, unidadesRede, unidadeFiltro, se
                       </div>
                     ))}
                   </div>
+
+                  <div style={{ color: C.mut, fontSize: 10.5, fontWeight: 700, letterSpacing: 0.5, marginBottom: 8 }}>DESAFIO & PROGRESSO</div>
+                  {!det && <div style={{ color: C.mut, fontSize: 12, marginBottom: 14 }}>Não achei o cadastro desse aluno em nenhum desafio ativo.</div>}
+                  {det && (
+                    <div style={{ marginBottom: 14 }}>
+                      <div style={{ fontSize: 12.5 }}>
+                        <b style={{ color: C.tealSoft }}>{det.trackLabel}</b> — {det.prog.doneCount}/9 missões {det.prog.full ? "(cartela cheia ⭐)" : ""}
+                      </div>
+                    </div>
+                  )}
+
+                  <div style={{ color: C.mut, fontSize: 10.5, fontWeight: 700, letterSpacing: 0.5, marginBottom: 8 }}>SELOS JÁ GANHOS</div>
+                  {(!det || det.carimbos.length === 0) && <div style={{ color: C.mut, fontSize: 12 }}>Nenhum selo conquistado ainda.</div>}
+                  {det && det.carimbos.length > 0 && (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {det.carimbos.map((c) => (
+                        <span key={c.id} title={c.detalhe} style={{
+                          background: C.panelSoft, borderRadius: 999, padding: "5px 12px", fontSize: 11.5, fontWeight: 700, color: C.oak,
+                        }}>🏅 {c.nome}</span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </Painel>
@@ -5672,8 +5734,8 @@ function PainelComportamento({ metricas, buscas, unidadesRede, unidadeFiltro, se
   );
 }
 
-function PainelExportarDados({ allData, metricas, clube, unidadesRede, unidadeFiltro, semCabecalho, voltar }) {
-  const [marcados, setMarcados] = useState({ alunos: true, uso: true, clube: true, desafio: true });
+function PainelExportarDados({ allData, metricas, clube, unidadesRede, unidadeFiltro, buscas, indicacoes, nomeDaChave, semCabecalho, voltar }) {
+  const [marcados, setMarcados] = useState({ alunos: true, uso: true, clube: true, desafio: true, comportamento: true, indicacoes: true, unidades: true });
   const nomeUnidade = (id) => (unidadesRede.find((u) => u.id === id) || {}).nome || id;
   const hoje = new Date().toISOString().slice(0, 10);
 
@@ -5709,6 +5771,43 @@ function PainelExportarDados({ allData, metricas, clube, unidadesRede, unidadeFi
         linhas.push([t.label, s.name, `${prog.doneCount}/9`, prog.full ? "Sim" : "Não"]);
       }));
       baixarCsv(`desafio-${hoje}.csv`, linhas);
+    }
+    if (marcados.comportamento) {
+      const alunos = Object.entries(metricas.alunos || {}).map(([chave, a]) => ({ chave, ...a }));
+      const porPagina = {};
+      alunos.forEach((a) => {
+        Object.entries(a.telas || {}).forEach(([t, n]) => { if (!porPagina[t]) porPagina[t] = { visitas: 0, min: 0 }; porPagina[t].visitas += n; });
+        Object.entries(a.telasMin || {}).forEach(([t, n]) => { if (!porPagina[t]) porPagina[t] = { visitas: 0, min: 0 }; porPagina[t].min += n; });
+      });
+      const linhasPaginas = [["Página", "Visitas (soma de todos)", "Tempo aproximado (min)"]];
+      Object.entries(porPagina).sort((a, b) => b[1].min - a[1].min).forEach(([t, v]) => linhasPaginas.push([rotuloTela(t), v.visitas, v.min]));
+      baixarCsv(`comportamento-paginas-${hoje}.csv`, linhasPaginas);
+
+      const linhasBuscas = [["Termo buscado", "Vezes"]];
+      Object.entries(buscas || {}).sort((a, b) => b[1] - a[1]).forEach(([termo, n]) => linhasBuscas.push([termo, n]));
+      baixarCsv(`comportamento-buscas-${hoje}.csv`, linhasBuscas);
+    }
+    if (marcados.indicacoes && indicacoes) {
+      const linhas = [["Indicado por", "Amigo indicado", "WhatsApp", "Data", "Fechou pacote?", "Aulas"]];
+      Object.entries(indicacoes).forEach(([chaveIndicador, lista]) => {
+        (lista || []).forEach((ind) => {
+          linhas.push([
+            (nomeDaChave && nomeDaChave(chaveIndicador)) || chaveIndicador, ind.nome || "",
+            ind.telefone ? fmtPhone(ind.telefone) : "", ind.ts ? new Date(ind.ts).toLocaleDateString("pt-BR") : "",
+            ind.comprou ? "Sim" : "Ainda não", ind.qtdAulas || "",
+          ]);
+        });
+      });
+      baixarCsv(`indicacoes-${hoje}.csv`, linhas);
+    }
+    if (marcados.unidades) {
+      const linhas = [["Unidade", "Cidade", "Alunos vinculados"]];
+      (unidadesRede || []).forEach((u) => {
+        let n = 0;
+        TRACKS.forEach((t) => ((allData[t.id] || {}).students || []).forEach((s) => { if ((s.unidade || UNIDADE) === u.id) n += 1; }));
+        linhas.push([u.nome, u.cidade || "", n]);
+      });
+      baixarCsv(`unidades-${hoje}.csv`, linhas);
     }
   };
 
@@ -5881,8 +5980,19 @@ function PainelIndicacoes({ config, salvarMetasIndicacao, indicacoes, atualizarI
   };
   const alternarComprou = async (ind) => {
     setSalvandoId(ind.id);
-    await atualizarIndicacao(ind.chaveIndicador, ind.id, { comprou: !ind.comprou });
+    const novoValor = !ind.comprou;
+    await atualizarIndicacao(ind.chaveIndicador, ind.id, novoValor ? { comprou: true } : { comprou: false, qtdAulas: null });
     setSalvandoId(null);
+  };
+  const [aulasEditando, setAulasEditando] = useState({}); // { [id]: valor digitando }
+  const salvarAulas = async (ind) => {
+    const valor = aulasEditando[ind.id];
+    if (valor === undefined) return;
+    const n = parseInt(valor, 10);
+    setSalvandoId(ind.id);
+    await atualizarIndicacao(ind.chaveIndicador, ind.id, { qtdAulas: n > 0 ? n : null });
+    setSalvandoId(null);
+    setAulasEditando((prev) => { const novo = { ...prev }; delete novo[ind.id]; return novo; });
   };
 
   return (
@@ -5896,8 +6006,8 @@ function PainelIndicacoes({ config, salvarMetasIndicacao, indicacoes, atualizarI
         </div>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 20 }}>
-        {[["TOTAL DE INDICAÇÕES", todas.length], ["FECHARAM PACOTE", totalFechou], ["TAXA DE CONVERSÃO", todas.length ? `${Math.round((totalFechou / todas.length) * 100)}%` : "—"]].map(([label, valor]) => (
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 20 }}>
+        {[["TOTAL DE INDICAÇÕES", todas.length], ["FECHARAM PACOTE", totalFechou], ["TAXA DE CONVERSÃO", todas.length ? `${Math.round((totalFechou / todas.length) * 100)}%` : "—"], ["AULAS VENDIDAS (VIA INDICAÇÃO)", todas.reduce((s, i) => s + (i.qtdAulas || 0), 0)]].map(([label, valor]) => (
           <Painel key={label} style={{ display: "grid", gap: 4 }}>
             <div style={{ color: C.mut, fontSize: 10.5, fontWeight: 700, letterSpacing: 0.4 }}>{label}</div>
             <div style={{ color: C.cream, fontWeight: 800, fontSize: 24 }}>{valor}</div>
@@ -5962,15 +6072,15 @@ function PainelIndicacoes({ config, salvarMetasIndicacao, indicacoes, atualizarI
 
       <Painel style={{ padding: 0 }}>
         {semCabecalho && (
-          <div style={{ display: "grid", gridTemplateColumns: "1.6fr 1.6fr 1.1fr 1fr 1fr", gap: 8, padding: "12px 16px", borderBottom: `1px solid ${C.line}` }}>
-            {["INDICADO POR", "AMIGO INDICADO", "WHATSAPP", "DATA", "FECHOU PACOTE?"].map((h) => (
+          <div style={{ display: "grid", gridTemplateColumns: "1.3fr 1.3fr 1fr 0.8fr 0.9fr 0.8fr", gap: 8, padding: "12px 16px", borderBottom: `1px solid ${C.line}` }}>
+            {["INDICADO POR", "AMIGO INDICADO", "WHATSAPP", "DATA", "FECHOU PACOTE?", "AULAS"].map((h) => (
               <div key={h} style={{ color: C.mut, fontSize: 10.5, fontWeight: 800, letterSpacing: 0.5 }}>{h}</div>
             ))}
           </div>
         )}
         {filtradas.slice(0, 300).map((ind) => (
           <div key={ind.id} style={{
-            display: "grid", gridTemplateColumns: semCabecalho ? "1.6fr 1.6fr 1.1fr 1fr 1fr" : "1fr",
+            display: "grid", gridTemplateColumns: semCabecalho ? "1.3fr 1.3fr 1fr 0.8fr 0.9fr 0.8fr" : "1fr",
             gap: semCabecalho ? 8 : 4, padding: semCabecalho ? "12px 16px" : "10px 4px", borderBottom: `1px solid ${C.line}`, alignItems: "center", fontSize: 13,
           }}>
             <div style={{ fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{nomeDaChave(ind.chaveIndicador) || "—"}</div>
@@ -5981,6 +6091,20 @@ function PainelIndicacoes({ config, salvarMetasIndicacao, indicacoes, atualizarI
               <input type="checkbox" checked={!!ind.comprou} disabled={salvandoId === ind.id} onChange={() => alternarComprou(ind)} />
               <span style={{ color: ind.comprou ? C.ok : C.mut, fontWeight: 700, fontSize: 11.5 }}>{ind.comprou ? "Sim ✓" : "Ainda não"}</span>
             </label>
+            <div>
+              {ind.comprou ? (
+                <input
+                  type="number" min="1" placeholder="Qtd"
+                  value={aulasEditando[ind.id] !== undefined ? aulasEditando[ind.id] : (ind.qtdAulas || "")}
+                  disabled={salvandoId === ind.id}
+                  onChange={(e) => setAulasEditando((prev) => ({ ...prev, [ind.id]: e.target.value }))}
+                  onBlur={() => salvarAulas(ind)}
+                  style={{ ...inputStyle(), width: 64, padding: "6px 8px", fontSize: 12.5 }}
+                />
+              ) : (
+                <span style={{ color: C.mut, fontSize: 12 }}>—</span>
+              )}
+            </div>
           </div>
         ))}
         {filtradas.length === 0 && <div style={{ padding: 24, textAlign: "center", color: C.mut, fontSize: 13 }}>Nenhuma indicação encontrada.</div>}
