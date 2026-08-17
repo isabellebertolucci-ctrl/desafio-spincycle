@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { escolherMsgRadar, categoriaInatividade } from "./RADAR_MSGS_400";
 import ursoLogoDesafioImg from "./urso-logo-desafio.png";
+import QRCode from "qrcode"; // ⚠️ precisa adicionar "qrcode" no package.json (arquivo à parte)
 
 /* ============================================================
    COMUNIDADE SPINCYCLE — v2
@@ -544,29 +545,26 @@ function rngDe(seed) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
+// ---------- QR real (biblioteca `qrcode`, adicionada no package.json) ----------
 function QRCard({ codigo, size = 168 }) {
-  const N = 21, cel = size / N;
-  const rnd = rngDe(hash32(codigo));
-  const mods = [];
-  const finder = (x, y) => {
-    for (let i = 0; i < 7; i++) for (let j = 0; j < 7; j++) {
-      const borda = i === 0 || i === 6 || j === 0 || j === 6;
-      const miolo = i >= 2 && i <= 4 && j >= 2 && j <= 4;
-      if (borda || miolo) mods.push([x + j, y + i]);
-    }
-  };
-  finder(0, 0); finder(N - 7, 0); finder(0, N - 7);
-  const ocupado = (x, y) => (x < 8 && y < 8) || (x >= N - 8 && y < 8) || (x < 8 && y >= N - 8);
-  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
-    if (!ocupado(x, y) && rnd() > 0.52) mods.push([x, y]);
-  }
+  const canvasRef = useRef(null);
+  const [erro, setErro] = useState(false);
+  useEffect(() => {
+    let cancelado = false;
+    if (!canvasRef.current) return;
+    QRCode.toCanvas(canvasRef.current, String(codigo), {
+      width: size, margin: 1, errorCorrectionLevel: "M",
+      color: { dark: "#111113", light: "#FFFFFF" },
+    }).catch(() => { if (!cancelado) setErro(true); });
+    return () => { cancelado = true; };
+  }, [codigo, size]);
   return (
     <div style={{ background: "#FFFFFF", borderRadius: 12, padding: 14, display: "inline-block" }}>
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-        {mods.map(([x, y], i) => (
-          <rect key={i} x={x * cel} y={y * cel} width={cel * 0.95} height={cel * 0.95} fill="#111113" />
-        ))}
-      </svg>
+      {erro
+        ? <div style={{ width: size, height: size, display: "flex", alignItems: "center", justifyContent: "center", color: "#B33636", fontSize: 12, textAlign: "center", padding: 8 }}>
+            Não foi possível gerar o QR
+          </div>
+        : <canvas ref={canvasRef} width={size} height={size} style={{ display: "block" }} />}
       <div style={{ color: "#111113", fontWeight: 800, fontSize: 13, textAlign: "center", marginTop: 8, letterSpacing: 1 }}>{codigo}</div>
     </div>
   );
@@ -2162,39 +2160,78 @@ export default function App() {
     setPerfilVisto(alvo.pv || null);
     setTela(alvo.tela);
   };
+  // 🔄 Puxar de cima pra baixo recarrega os dados (mesma função usada no refresh automático de 60s)
+  const pullRef = useRef({ ativo: false, y: 0 });
+  const [pullDist, setPullDist] = useState(0);
+  const [atualizando, setAtualizando] = useState(false);
   const aoTocar = (e) => {
     const t = e.touches[0];
     gestoRef.current = t.clientX <= 36 ? { x: t.clientX, y: t.clientY, ativo: true } : null;
+    if (!gestoRef.current && window.scrollY <= 4 && !atualizando) {
+      pullRef.current = { ativo: true, y: t.clientY };
+    }
   };
   const aoArrastar = (e) => {
     const g = gestoRef.current;
-    if (!g || !g.ativo) return;
-    const t = e.touches[0];
-    const dx = t.clientX - g.x;
-    const dy = Math.abs(t.clientY - g.y);
-    if (dy > 70) {
-      g.ativo = false;
-      if (contRef.current) { contRef.current.style.transition = "transform .18s ease"; contRef.current.style.transform = ""; }
+    if (g && g.ativo) {
+      const t = e.touches[0];
+      const dx = t.clientX - g.x;
+      const dy = Math.abs(t.clientY - g.y);
+      if (dy > 70) {
+        g.ativo = false;
+        if (contRef.current) { contRef.current.style.transition = "transform .18s ease"; contRef.current.style.transform = ""; }
+        return;
+      }
+      if (dx > 0 && contRef.current) {
+        contRef.current.style.transition = "none";
+        contRef.current.style.transform = `translateX(${Math.min(dx, 130)}px)`;
+        contRef.current.style.opacity = String(1 - Math.min(dx, 130) / 500);
+      }
       return;
     }
-    if (dx > 0 && contRef.current) {
-      contRef.current.style.transition = "none";
-      contRef.current.style.transform = `translateX(${Math.min(dx, 130)}px)`;
-      contRef.current.style.opacity = String(1 - Math.min(dx, 130) / 500);
+    const p = pullRef.current;
+    if (p.ativo) {
+      const t = e.touches[0];
+      const dy = t.clientY - p.y;
+      setPullDist(dy > 0 && window.scrollY <= 4 ? Math.min(dy, 90) : 0);
     }
   };
   const aoSoltar = (e) => {
     const g = gestoRef.current;
-    if (!g) return;
-    const dx = e.changedTouches[0].clientX - g.x;
-    if (contRef.current) {
-      contRef.current.style.transition = "transform .18s ease, opacity .18s ease";
-      contRef.current.style.transform = "";
-      contRef.current.style.opacity = "1";
+    if (g) {
+      const dx = e.changedTouches[0].clientX - g.x;
+      if (contRef.current) {
+        contRef.current.style.transition = "transform .18s ease, opacity .18s ease";
+        contRef.current.style.transform = "";
+        contRef.current.style.opacity = "1";
+      }
+      if (g.ativo && dx > 70) voltarGesto();
+      gestoRef.current = null;
+      return;
     }
-    if (g.ativo && dx > 70) voltarGesto();
-    gestoRef.current = null;
+    if (pullRef.current.ativo) {
+      pullRef.current.ativo = false;
+      if (pullDist > 60) {
+        setAtualizando(true);
+        setPullDist(60);
+        carregarLeves().finally(() => { setAtualizando(false); setPullDist(0); });
+      } else {
+        setPullDist(0);
+      }
+    }
   };
+  const indicadorPull = (pullDist > 0 || atualizando) ? (
+    <div style={{
+      display: "flex", justifyContent: "center", alignItems: "center",
+      height: atualizando ? 44 : Math.min(pullDist, 60), overflow: "hidden", transition: atualizando ? "height .15s ease" : "none",
+    }}>
+      <span style={{
+        fontSize: 18, color: C.oak, display: "inline-block",
+        animation: atualizando ? "girar 0.7s linear infinite" : "none",
+        transform: atualizando ? "none" : `rotate(${Math.min(pullDist, 60) * 3}deg)`,
+      }}>🔄</span>
+    </div>
+  ) : null;
 
   // ---------- Modo demonstração ----------
   const bancoVazio = TRACKS.every((t) => {
@@ -2323,7 +2360,12 @@ export default function App() {
       novo.alunos[meu] = a;
       Object.keys(b.parceiros).forEach((pid) => {
         const px = novo.parceiros[pid] || {};
-        novo.parceiros[pid] = { ...px, aberturas: (px.aberturas || 0) + b.parceiros[pid] };
+        const hojeStr = todayStr();
+        const porDia = { ...(px.porDia || {}) };
+        porDia[hojeStr] = (porDia[hojeStr] || 0) + b.parceiros[pid];
+        const chaves = Object.keys(porDia).sort();
+        while (chaves.length > 60) delete porDia[chaves.shift()]; // guarda só os últimos ~60 dias
+        novo.parceiros[pid] = { ...px, aberturas: (px.aberturas || 0) + b.parceiros[pid], porDia };
       });
       Object.keys(b.favParceiros || {}).forEach((pid) => {
         const px = novo.parceiros[pid] || {};
@@ -3116,6 +3158,7 @@ export default function App() {
         body { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         button { font-family: inherit; }
+        @keyframes girar { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
       `}</style>
       {!semNav && sessao && (
         <div style={{
@@ -3147,6 +3190,7 @@ export default function App() {
       )}
       <div ref={contRef} onTouchStart={aoTocar} onTouchMove={aoArrastar} onTouchEnd={aoSoltar}
         style={{ maxWidth: 520, margin: "0 auto", padding: "16px 16px 110px" }}>
+        {indicadorPull}
         {conteudo}
       </div>
       {!semNav && <BarraInferior tela={tela} setTela={setTela} foto={minhaFoto} nome={sessao && sessao.name} naoLidas={naoLidas} abrirNotificacoes={abrirNotificacoes} />}
@@ -3215,13 +3259,13 @@ export default function App() {
       painelAtivo = <PainelCadastrosAlunos allData={allDataUn} fotos={fotos} salvarCadastroAluno={salvarCadastroAluno} avisar={avisar} semCabecalho unidadesRede={unidadesRede} />;
     } else if (abaAdminLarga === "unidades" && adminSuper) {
       painelAtivo = <PainelUnidades unidadesRede={unidadesRede} salvarUnidadesRede={salvarUnidadesRede} allData={allData} semCabecalho />;
-    } else if (abaAdminLarga === "desafios" && (adminSuper || adminPerms.painelCompleto || adminPerms.editarArena)) {
-      painelAtivo = <PainelDesafios config={config} salvarConfig={salvarConfig} semCabecalho />;
     } else if (abaAdminLarga === "clube" && clubeAcesso.ver) {
       painelAtivo = <CadastroClube clube={clube} salvarClube={salvarClube} removerParceiro={removerParceiro}
         lancarCampanha={lancarCampanha} metricas={metricas} acesso={clubeAcesso} semCabecalho voltar={() => {}} />;
     } else if (abaAdminLarga === "admins" && adminSuper) {
       painelAtivo = <TelaGestaoAdmins adminsReg={adminsReg} salvarAdmins={salvarAdmins} allData={allData} fotos={fotos} avisar={avisar} semCabecalho voltar={() => {}} />;
+    } else if (abaAdminLarga === "exportar" && (adminSuper || adminPerms.painelCompleto)) {
+      painelAtivo = <PainelExportarDados allData={allData} metricas={metricas} clube={clube} unidadesRede={unidadesRede} unidadeFiltro={unidadeFiltro} semCabecalho />;
     } else if (abaAdminLarga === "missoes") {
       const linhas = TRACKS.map((t) => {
         const alunosTrack = ((allDataUn[t.id] || {}).students || []);
@@ -3252,9 +3296,13 @@ export default function App() {
         <div>
           <div style={{ marginBottom: 20 }}>
             <div style={{ color: C.mut, fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 6 }}>PAINEL ADMINISTRATIVO</div>
-            <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: 0.3 }}>Missões & Arena</div>
-            <div style={{ color: C.mut, fontSize: 13, marginTop: 4 }}>Acompanhe participação, avanço e grupos do desafio</div>
+            <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: 0.3 }}>Desafios & Missões</div>
+            <div style={{ color: C.mut, fontSize: 13, marginTop: 4 }}>Fotos dos desafios, participação, avanço e grupos</div>
           </div>
+
+          <PainelDesafios config={config} salvarConfig={salvarConfig} semCabecalho />
+
+          <div style={{ height: 26 }} />
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 20 }}>
             {[["CADASTRADOS", totCadastrados, false], ["ATIVOS NO DESAFIO", totAtivos, false], ["TAXA DE PARTICIPAÇÃO", `${taxaParticipacao}%`, false], ["CARTELAS CHEIAS", totCartelas, true]].map(([label, valor, destaque]) => (
               <Painel key={label} style={{ border: destaque ? `1.5px solid ${C.oak}` : undefined, display: "grid", gap: 4 }}>
@@ -3316,7 +3364,7 @@ export default function App() {
         minHeight: "100vh", background: C.bg, color: C.cream, fontFamily: "'Montserrat', sans-serif",
         display: "flex", flexDirection: compacta ? "column" : "row",
       }}>
-        <style>{`@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&display=swap'); html,body{margin:0;background:${C.bg};} *{box-sizing:border-box;} button{font-family:inherit;}`}</style>
+        <style>{`@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&display=swap'); html,body{margin:0;background:${C.bg};} *{box-sizing:border-box;} button{font-family:inherit;} @keyframes girar { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
         <div style={{
           width: compacta ? "100%" : 220, flexShrink: 0, borderRight: compacta ? "none" : `1px solid ${C.line}`,
           borderBottom: compacta ? `1px solid ${C.line}` : "none",
@@ -3393,10 +3441,10 @@ export default function App() {
             {abaBtnLarga("geral", "📊 Visão geral")}
             {abaBtnLarga("cadastros", "👤 Cadastros de alunos", podeVerCadastros)}
             {abaBtnLarga("clube", "🎟️ Clube Spincycle", clubeAcesso.ver)}
-            {abaBtnLarga("missoes", "🐻 Missões & Arena")}
-            {abaBtnLarga("admins", "🔑 Gestão de admins", adminSuper)}
+            {abaBtnLarga("missoes", "🐻 Desafios & Missões")}
             {abaBtnLarga("unidades", "🏢 Unidades", adminSuper)}
-            {abaBtnLarga("desafios", "🎪 Desafios", adminSuper || !!adminPerms.painelCompleto || !!adminPerms.editarArena)}
+            {abaBtnLarga("admins", "🔑 Gestão de admins", adminSuper)}
+            {abaBtnLarga("exportar", "⬇️ Exportar dados", adminSuper || !!adminPerms.painelCompleto)}
           </nav>
           {!compacta && (
             <div style={{ marginTop: "auto", padding: 16, display: "grid", gap: 8 }}>
@@ -3432,7 +3480,9 @@ export default function App() {
             </button>
           </div>
         )}
-        <div style={{ flex: 1, minWidth: 0, padding: compacta ? "18px 16px" : "28px 36px", maxWidth: compacta ? "100%" : 1200 }}>
+        <div onTouchStart={aoTocar} onTouchMove={aoArrastar} onTouchEnd={aoSoltar}
+          style={{ flex: 1, minWidth: 0, padding: compacta ? "18px 16px" : "28px 36px", maxWidth: compacta ? "100%" : 1200 }}>
+          {compacta && indicadorPull}
           {painelAtivo}
         </div>
         <Toast msg={msg} />
@@ -3999,7 +4049,7 @@ function BarraInferior({ tela, setTela, foto, nome, naoLidas = 0, abrirNotificac
       }}>
         {item("inicio", (a) => (
           <span style={{ boxShadow: a ? `0 0 0 2px ${C.oak}` : "none", borderRadius: "50%" }}>
-            <Avatar foto={foto} nome={nome} size={30} />
+            <Avatar foto={foto} nome={nome} size={26} />
           </span>
         ))}
         {item("notificacoes", (a) => (
@@ -4215,6 +4265,7 @@ function CadastroClube({ clube, salvarClube, removerParceiro, lancarCampanha, me
   const vazio = { id: null, nome: "", categoria: "", endereco: "", site: "", documento: "", unidade: "", beneficio: "", codigo: "", plus: false, logo: null, mensalidade: "", cobrancaLink: "", pagoAte: "", acoes: [] };
   const hoje = todayStr();
   const [form, setForm] = useState(null); // null = lista; objeto = editando/criando
+  const [verDetalhe, setVerDetalhe] = useState(null); // id do parceiro em detalhe, ou null
   const fileRef = useRef(null);
   const parceiros = [...(clube.parceiros || [])].sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
 
@@ -4261,7 +4312,84 @@ function CadastroClube({ clube, salvarClube, removerParceiro, lancarCampanha, me
           </div>
         </>
       )}
-      {!form ? (
+      {verDetalhe ? (() => {
+        const p = parceiros.find((x) => x.id === verDetalhe);
+        if (!p) { setVerDetalhe(null); return null; }
+        const m = (metricas.parceiros || {})[p.id] || {};
+        const porDia = m.porDia || {};
+        const ultimos14 = Array.from({ length: 14 }, (_, i) => {
+          const d = new Date(); d.setDate(d.getDate() - (13 - i));
+          const chave = d.toISOString().slice(0, 10);
+          return { rotulo: String(d.getDate()), valor: porDia[chave] || 0 };
+        });
+        const totalUlt14 = ultimos14.reduce((s, d) => s + d.valor, 0);
+        const receitaAnual = (parseFloat(String(p.mensalidade).replace(",", ".")) || 0) * 12;
+        const diasAteVencer = p.pagoAte ? Math.round((toDate(p.pagoAte) - toDate(hoje)) / dayMs) : null;
+        const primeiroVoucher = (p.vouchers || [])[0];
+        return (
+          <>
+            <button style={{ ...btnFantasma(), marginBottom: 12, color: C.mut }} onClick={() => setVerDetalhe(null)}>‹ Voltar pra lista</button>
+            <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 18 }}>
+              {p.logo
+                ? <img src={p.logo} alt="" style={{ width: 52, height: 52, borderRadius: 10, objectFit: "cover", flexShrink: 0 }} />
+                : <div style={{ width: 52, height: 52, borderRadius: 10, background: C.panelSoft, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>🏪</div>}
+              <div>
+                <div style={{ fontWeight: 800, fontSize: 18 }}>{p.nome} {p.plus && <span style={{ color: C.oak }}>⭐</span>}</div>
+                <div style={{ color: C.mut, fontSize: 12.5 }}>{p.categoria} · código {p.codigo}</div>
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 20 }}>
+              {[
+                ["ABERTURAS (TOTAL)", m.aberturas || 0],
+                ["FAVORITOS", m.favoritos || 0],
+                ["ÚLTIMOS 14 DIAS", totalUlt14],
+                ["VIGÊNCIA", diasAteVencer === null ? "—" : diasAteVencer >= 0 ? `${diasAteVencer}d restantes` : "vencido"],
+              ].map(([label, valor]) => (
+                <Painel key={label} style={{ display: "grid", gap: 4 }}>
+                  <div style={{ color: C.mut, fontSize: 9.5, fontWeight: 700, letterSpacing: 0.3 }}>{label}</div>
+                  <div style={{ color: C.cream, fontWeight: 800, fontSize: 19 }}>{valor}</div>
+                </Painel>
+              ))}
+            </div>
+
+            <Painel style={{ marginBottom: 16 }}>
+              <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 4 }}>📈 Aberturas por dia — últimos 14 dias</div>
+              {totalUlt14 === 0 ? (
+                <div style={{ color: C.mut, fontSize: 11.5, padding: "16px 0", textAlign: "center" }}>
+                  Ainda sem histórico diário suficiente. O rastreio começou agora — em algumas semanas esse gráfico vai ficar rico de verdade.
+                </div>
+              ) : (
+                <MiniBarChart dados={ultimos14} cor={C.tealSoft} />
+              )}
+            </Painel>
+
+            {primeiroVoucher && (
+              <Painel style={{ marginBottom: 16, textAlign: "center" }}>
+                <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 10 }}>🔳 QR do primeiro voucher (pra testar)</div>
+                <QRCard codigo={`${primeiroVoucher.codigo}·TESTE`} size={140} />
+              </Painel>
+            )}
+
+            <Painel style={{ marginBottom: 16 }}>
+              <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 8 }}>📋 Resumo pra apresentar ao parceiro</div>
+              <div style={{ color: C.mut, fontSize: 12.5, lineHeight: 1.7 }}>
+                Desde que entrou no Clube, <b style={{ color: C.cream }}>{p.nome}</b> teve <b style={{ color: C.oak }}>{m.aberturas || 0}</b> aberturas
+                de QR e foi favoritado por <b style={{ color: C.oak }}>{m.favoritos || 0}</b> pessoas.
+                {p.mensalidade && <> A mensalidade atual é <b style={{ color: C.cream }}>R$ {p.mensalidade}</b> (R$ {receitaAnual.toFixed(2).replace(".", ",")}/ano).</>}
+              </div>
+            </Painel>
+
+            <button style={{ ...btnFantasma(), border: `1px solid ${C.line}`, borderRadius: 10, padding: "10px 14px" }}
+              onClick={() => setForm({ id: p.id, nome: p.nome, categoria: p.categoria || "", endereco: p.endereco || "", site: p.site || "", documento: p.documento || "", unidade: p.unidade || "", beneficio: p.beneficio || "", codigo: p.codigo || "", plus: !!p.plus, logo: p.logo || null, mensalidade: p.mensalidade || "", cobrancaLink: p.cobrancaLink || "", pagoAte: p.pagoAte || "", acoes: p.acoes || [] })}>
+              ✏️ Editar cadastro deste parceiro
+            </button>
+            <div style={{ color: C.mut, fontSize: 10.5, marginTop: 14, lineHeight: 1.5 }}>
+              ⚠️ Ainda não rastreamos gênero/comportamento de quem abre cada parceiro — só sabemos o total. Se quiser esse nível de detalhe, dá pra adicionar (é um passo a mais de rastreio).
+            </div>
+          </>
+        );
+      })() : !form ? (
         <>
           <button style={{ ...btnPrimario(), marginBottom: 12 }} onClick={() => setForm({ ...vazio })}>+ NOVO PARCEIRO</button>
           <div style={{ display: "grid", gap: 8 }}>
@@ -4271,7 +4399,9 @@ function CadastroClube({ clube, salvarClube, removerParceiro, lancarCampanha, me
                   ? <img src={p.logo} alt="" style={{ width: 40, height: 40, borderRadius: 8, objectFit: "cover", flexShrink: 0 }} />
                   : <div style={{ width: 40, height: 40, borderRadius: 8, background: C.panelSoft, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>🏪</div>}
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 700, fontSize: 13.5 }}>{p.nome} {p.plus && <span style={{ color: C.oak, fontSize: 11 }}>⭐</span>}</div>
+                  <div onClick={() => setVerDetalhe(p.id)} style={{ fontWeight: 700, fontSize: 13.5, cursor: "pointer" }}>
+                    {p.nome} {p.plus && <span style={{ color: C.oak, fontSize: 11 }}>⭐</span>} <span style={{ color: C.tealSoft, fontSize: 11 }}>· ver detalhes ›</span>
+                  </div>
                   <div style={{ color: C.mut, fontSize: 11.5 }}>{p.categoria} · código <b style={{ color: C.tealSoft }}>{p.codigo}</b> · {(p.vouchers || []).length} voucher(s) · 👁 {((metricas.parceiros || {})[p.id] || {}).aberturas || 0} aberturas</div>
                   <div style={{ fontSize: 11.5, marginTop: 3 }}>
                     {p.mensalidade && <span style={{ color: C.mut }}>R$ {p.mensalidade}/mês · </span>}
@@ -4879,6 +5009,25 @@ function BarraGraf({ rotulo, valor, max, sufixo = "", cor }) {
   );
 }
 
+// Gráfico simples de barras verticais — usado no detalhe do parceiro (aberturas por dia).
+function MiniBarChart({ dados, cor, altura = 90 }) {
+  const max = Math.max(1, ...dados.map((d) => d.valor));
+  return (
+    <div style={{ display: "flex", alignItems: "flex-end", gap: 4, height: altura }}>
+      {dados.map((d, i) => (
+        <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, height: "100%", justifyContent: "flex-end" }}>
+          <div title={`${d.rotulo}: ${d.valor}`} style={{
+            width: "100%", maxWidth: 18, borderRadius: "3px 3px 0 0",
+            height: `${Math.max(3, Math.round((d.valor / max) * (altura - 18)))}px`,
+            background: d.valor > 0 ? (cor || C.tealSoft) : C.line,
+          }} />
+          <span style={{ fontSize: 8.5, color: C.mut }}>{d.rotulo}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function TelaPainelAdm({ metricas, clube, fotos, allData, muralAlunos, reacts, comentarios, abrirPerfilAluno, profundo, presenca = {}, irAdmins, semCabecalho, voltar, config, irCadastros, irClube, irMissoes, adminSuper, salvarConfig }) {
   const [ordem, setOrdem] = useState("recentes"); // recentes | az | ativos
   const [verTodosAlunos, setVerTodosAlunos] = useState(false);
@@ -5241,6 +5390,103 @@ function slugify(txt) {
     .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }
 // ---------- Desafios da Arena (só a dona/painelCompleto) — foto de cada desafio ----------
+// ---------- Exportar dados (só a dona/painelCompleto) ----------
+function csvDe(linhas) {
+  return linhas.map((l) => l.map((c) => `"${String(c === undefined || c === null ? "" : c).replace(/"/g, '""')}"`).join(";")).join("\n");
+}
+function baixarCsv(nome, linhas) {
+  const blob = new Blob(["\uFEFF" + csvDe(linhas)], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = nome;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+const BLOCOS_EXPORTACAO = [
+  { id: "alunos", nome: "Alunos", desc: "Nome, contato, gênero, unidade, status do desafio" },
+  { id: "uso", nome: "Crescimento e uso", desc: "Entradas, tempo no app, última atividade por aluno" },
+  { id: "clube", nome: "Clube — conversão", desc: "Parceiros, aberturas, favoritos, receita" },
+  { id: "desafio", nome: "Desafio", desc: "Progresso de missões por aluno, por grupo" },
+];
+function PainelExportarDados({ allData, metricas, clube, unidadesRede, unidadeFiltro, semCabecalho, voltar }) {
+  const [marcados, setMarcados] = useState({ alunos: true, uso: true, clube: true, desafio: true });
+  const nomeUnidade = (id) => (unidadesRede.find((u) => u.id === id) || {}).nome || id;
+  const hoje = new Date().toISOString().slice(0, 10);
+
+  const gerar = () => {
+    if (marcados.alunos) {
+      const linhas = [["Nome", "Contato", "Gênero", "Unidade", "Status desafio", "Aprovado"]];
+      TRACKS.forEach((t) => ((allData[t.id] || {}).students || []).forEach((s) => {
+        const participa = (s.records || []).length > 0 || (s.guests || []).length > 0;
+        linhas.push([s.name, s.phone ? fmtPhone(s.phone) : "", s.genero === "F" ? "Feminino" : s.genero === "M" ? "Masculino" : "Não informado",
+          nomeUnidade(s.unidade || UNIDADE), participa ? "Ativo" : "Fora", s.approved === false ? "Pendente" : "Aprovado"]);
+      }));
+      baixarCsv(`alunos-${hoje}.csv`, linhas);
+    }
+    if (marcados.uso) {
+      const linhas = [["Aluno (chave)", "Entradas", "Minutos no app", "Última atividade"]];
+      Object.entries(metricas.alunos || {}).forEach(([chave, a]) => {
+        linhas.push([a.nome || chave, a.entradas || 0, a.min || 0, a.ultima ? new Date(a.ultima).toLocaleString("pt-BR") : ""]);
+      });
+      baixarCsv(`uso-alunos-${hoje}.csv`, linhas);
+    }
+    if (marcados.clube) {
+      const linhas = [["Parceiro", "Categoria", "Mensalidade", "Em dia até", "Aberturas", "Favoritos", "Receita/mês"]];
+      (clube.parceiros || []).forEach((p) => {
+        const m = (metricas.parceiros || {})[p.id] || {};
+        linhas.push([p.nome, p.categoria, p.mensalidade || 0, p.pagoAte || "", m.aberturas || 0, m.favoritos || 0, p.mensalidade || 0]);
+      });
+      baixarCsv(`clube-${hoje}.csv`, linhas);
+    }
+    if (marcados.desafio) {
+      const linhas = [["Grupo", "Aluno", "Missões cumpridas", "Cartela cheia?"]];
+      TRACKS.forEach((t) => ((allData[t.id] || {}).students || []).forEach((s) => {
+        const prog = computeProgress(s, t.targets);
+        linhas.push([t.label, s.name, `${prog.doneCount}/9`, prog.full ? "Sim" : "Não"]);
+      }));
+      baixarCsv(`desafio-${hoje}.csv`, linhas);
+    }
+  };
+
+  const nMarcados = Object.values(marcados).filter(Boolean).length;
+
+  return (
+    <>
+      {!semCabecalho && <CabecalhoTela titulo="EXPORTAR DADOS" sub="Escolha o que exportar. Cada bloco marcado vira um arquivo CSV separado, pronto pra abrir no Excel ou Google Sheets." voltar={voltar} />}
+      {semCabecalho && (
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ color: C.mut, fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 6 }}>PAINEL ADMINISTRATIVO</div>
+          <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: 0.3 }}>Exportar dados</div>
+          <div style={{ color: C.mut, fontSize: 13, marginTop: 4 }}>Escolha o que exportar — cada bloco vira um CSV separado.</div>
+        </div>
+      )}
+      <div style={{ color: C.mut, fontSize: 12, marginBottom: 12 }}>
+        Unidade atual do filtro: <b style={{ color: C.tealSoft }}>{unidadeFiltro === ID_GLOBAL ? "Global (todas)" : nomeUnidade(unidadeFiltro)}</b>
+        {" "}— pra exportar só uma unidade, troque o filtro no topo do painel antes de gerar.
+      </div>
+      <div style={{ display: "grid", gap: 10, marginBottom: 20 }}>
+        {BLOCOS_EXPORTACAO.map((b) => (
+          <label key={b.id} style={{ display: "flex", gap: 12, alignItems: "center", cursor: "pointer" }}>
+            <Painel style={{ flex: 1, display: "flex", gap: 12, alignItems: "center", border: marcados[b.id] ? `1.5px solid ${C.teal}` : undefined }}>
+              <input type="checkbox" checked={!!marcados[b.id]} onChange={(e) => setMarcados({ ...marcados, [b.id]: e.target.checked })} style={{ width: 18, height: 18, flexShrink: 0 }} />
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 13.5 }}>{b.nome}</div>
+                <div style={{ color: C.mut, fontSize: 11.5 }}>{b.desc}</div>
+              </div>
+            </Painel>
+          </label>
+        ))}
+      </div>
+      <button disabled={nMarcados === 0} onClick={gerar} style={{ ...btnPrimario(), opacity: nMarcados === 0 ? 0.5 : 1 }}>
+        ⬇️ GERAR E BAIXAR ({nMarcados} arquivo{nMarcados === 1 ? "" : "s"})
+      </button>
+      <div style={{ color: C.mut, fontSize: 10.5, marginTop: 14, lineHeight: 1.5 }}>
+        ⚠️ "Crescimento e uso" hoje mostra o total acumulado — ainda não guardamos histórico dia a dia, então não dá pra exportar evolução por período ainda. Se quiser isso, é um passo a mais (começar a guardar um registro por dia a partir de agora).
+      </div>
+    </>
+  );
+}
+
 function PainelDesafios({ config, salvarConfig, semCabecalho, voltar }) {
   const ROTULOS = { andamento: "EM ANDAMENTO", breve: "EM BREVE", encerrado: "ENCERRADO" };
   const [enviando, setEnviando] = useState(null); // id do desafio com upload em andamento
@@ -5427,6 +5673,14 @@ function PainelCadastrosAlunos({ allData, fotos, salvarCadastroAluno, avisar, se
   const [q, setQ] = useState("");
   const [filtro, setFiltro] = useState("todos"); // todos | semGenero | pendentes | aprovados
   const [editando, setEditando] = useState(null); // { track, id, name, phone, genero, pass, approved }
+  const refEdicao = useRef(null);
+  useEffect(() => {
+    // 🖱️ Ao abrir a edição de um aluno mais abaixo na lista, rola até o formulário —
+    // sem isso ele aparecia no topo da página e era fácil nem perceber que abriu.
+    if (editando && refEdicao.current) {
+      refEdicao.current.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [editando]);
   const rows = [];
   TRACKS.forEach((t) => {
     const d = allData[t.id];
@@ -5500,6 +5754,7 @@ function PainelCadastrosAlunos({ allData, fotos, salvarCadastroAluno, avisar, se
       </div>
 
       {editando && (
+        <div ref={refEdicao}>
         <Painel style={{ display: "grid", gap: 8, marginBottom: 14, border: `1px solid ${C.teal}88` }}>
           <div style={{ color: C.oak, fontWeight: 800, fontSize: 12.5 }}>✏️ Editando cadastro</div>
           <input style={inputStyle()} placeholder="Nome" value={editando.name} onChange={(e) => setEditando({ ...editando, name: e.target.value })} />
@@ -5537,6 +5792,7 @@ function PainelCadastrosAlunos({ allData, fotos, salvarCadastroAluno, avisar, se
             <button style={{ ...btnPrimario(), flex: 2 }} onClick={salvar}>SALVAR</button>
           </div>
         </Painel>
+        </div>
       )}
 
       <Painel style={{ padding: 0 }}>
